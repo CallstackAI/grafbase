@@ -17,7 +17,7 @@ async-graphql = { git = "https://github.com/async-graphql/async-graphql", rev = 
 async-graphql-axum = { git = "https://github.com/async-graphql/async-graphql", rev = "44ae98335413a11e1acbc6c48135f452996e8a0b" }
 async-graphql-parser = { git = "https://github.com/async-graphql/async-graphql", rev = "44ae98335413a11e1acbc6c48135f452996e8a0b" }
 async-graphql-value = { git = "https://github.com/async-graphql/async-graphql", rev = "44ae98335413a11e1acbc6c48135f452996e8a0b" }
-axum = { git = "https://github.com/grafbase/axum", rev = "f9f1e4299ce247604ef2975171d0662e0fff5008" } # serve_configured
+axum = { git = "https://github.com/grafbase/axum", rev = "dd9a2c7391e9c1c1c8159cb825dedc198e60887e" } # serve_configured
 # Use our fork of dynomite that uses the 0.48 version of rusoto.
 dynomite = { git = "https://github.com/grafbase/dynomite", branch = "rusoto-0_48" }
 hyper-util = { git = "https://github.com/grafbase/hyper-util", rev = "3ad8fd132812dc1e33b5a4830b96dff01b8020a3" } # error-is-connect
