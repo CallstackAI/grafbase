@@ -432,8 +432,7 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 [[package]]
 name = "axum"
 version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d09dbe0e490df5da9d69b36dca48a76635288a82f92eca90024883a56202026d"
+source = "git+https://github.com/grafbase/axum?rev=f9f1e4299ce247604ef2975171d0662e0fff5008#f9f1e4299ce247604ef2975171d0662e0fff5008"
 dependencies = [
  "async-trait",
  "axum-core",
@@ -469,8 +468,7 @@ dependencies = [
 [[package]]
 name = "axum-core"
 version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e87c8503f93e6d144ee5690907ba22db7ba79ab001a932ab99034f0fe836b3df"
+source = "git+https://github.com/grafbase/axum?rev=f9f1e4299ce247604ef2975171d0662e0fff5008#f9f1e4299ce247604ef2975171d0662e0fff5008"
 dependencies = [
  "async-trait",
  "bytes",

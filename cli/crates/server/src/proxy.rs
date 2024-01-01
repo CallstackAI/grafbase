@@ -88,12 +88,14 @@ async fn start_inner(listener: TcpListener) -> Result<(), ServerError> {
             client,
         });
 
-    axum::serve(
+    axum::serve_configured(
         tokio::net::TcpListener::from_std(listener).map_err(ServerError::StartProxyServer)?,
         router,
+        |mut builder| {
+            builder.http1().preserve_header_case(true);
+            builder
+        },
     )
-    // FIXME: Bring back!
-    // .preserve_header_case(true)
     .await
     .map_err(ServerError::StartProxyServer)?;
 
