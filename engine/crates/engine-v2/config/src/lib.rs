@@ -1,4 +1,4 @@
-use federated_graph::FederatedGraphV1;
+use federated_graph::{FederatedGraph, FederatedGraphV1};
 
 // The specific version modules should be kept private, users of this crate
 // should only access types via `latest`
@@ -29,6 +29,12 @@ pub enum VersionedConfig {
 }
 
 impl VersionedConfig {
+    pub fn from_graph(graph: FederatedGraph) -> VersionedConfig {
+        match graph {
+            FederatedGraph::V1(graph) => Self::V1(graph),
+        }
+    }
+
     /// Converts a config of any version into whatever the latest version is.
     pub fn into_latest(self) -> latest::Config {
         match self {

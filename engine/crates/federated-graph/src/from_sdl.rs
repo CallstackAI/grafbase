@@ -138,9 +138,7 @@ fn ingest_fields<'a>(parsed: &'a ast::ServiceDocument, state: &mut State<'a>) ->
     for definition in &parsed.definitions {
         match definition {
             ast::TypeSystemDefinition::Schema(_) => {
-                return Err(DomainError(
-                    "Not implemented: schema definitions in federated schema".to_owned(),
-                ))
+                continue;
             }
             ast::TypeSystemDefinition::Directive(_) => (),
             ast::TypeSystemDefinition::Type(typedef) => match &typedef.node.kind {

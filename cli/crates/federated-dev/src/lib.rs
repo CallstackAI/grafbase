@@ -62,7 +62,7 @@ use tokio::runtime::Builder;
 use url::Url;
 
 /// FederatedGraphConfig should be provided to federated-dev via this watch::Receiver type
-pub type ConfigReceiver = tokio::sync::watch::Receiver<FederatedGraphConfig>;
+pub type ConfigWatcher = tokio::sync::watch::Receiver<FederatedGraphConfig>;
 
 /// Adds a subgraph to the running dev system.
 pub fn add_subgraph(name: &str, url: &Url, dev_api_port: u16, headers: Vec<(&str, &str)>) -> Result<(), Error> {
@@ -75,6 +75,11 @@ pub fn add_subgraph(name: &str, url: &Url, dev_api_port: u16, headers: Vec<(&str
 }
 
 /// Runs the federated dev system.
-pub async fn run(port: u16, expose: bool, config: ConfigReceiver) -> Result<(), Error> {
+pub async fn run(port: u16, expose: bool, config: ConfigWatcher) -> Result<(), Error> {
     dev::run(port, expose, config).await
+}
+
+/// Run the federated graph with static configuration.
+pub async fn static_graph_run(port: u16, expose: bool, config: engine_v2::VersionedConfig) -> Result<(), Error> {
+    dev::static_graph_run(port, expose, config).await
 }

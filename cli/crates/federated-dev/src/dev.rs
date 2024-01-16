@@ -7,16 +7,18 @@ use axum::{
     routing::get,
     Json,
 };
-use common::environment::Environment;
+use common::{channels::constant_watch_receiver, environment::Environment};
+use engine_v2::EngineEnv;
 use futures_util::{
     future::{join_all, BoxFuture},
     stream,
 };
 use gateway_v2::streaming::{encode_stream_response, StreamingFormat};
+use gateway_v2::{Gateway, GatewayEnv};
 use handlebars::Handlebars;
 use runtime::context::RequestContext as _;
 use serde_json::json;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver, UnboundedSender},
     watch,
@@ -28,7 +30,7 @@ use crate::{
         gateway_nanny::GatewayNanny,
         websockets::{WebsocketAccepter, WebsocketService},
     },
-    ConfigReceiver,
+    ConfigWatcher,
 };
 
 use self::{
@@ -54,7 +56,7 @@ struct ProxyState {
     gateway: GatewayWatcher,
 }
 
-pub(super) async fn run(port: u16, expose: bool, config: ConfigReceiver) -> Result<(), crate::Error> {
+pub(super) async fn run(port: u16, expose: bool, config: ConfigWatcher) -> Result<(), crate::Error> {
     log::trace!("starting the federated dev server");
 
     let (graph_sender, graph_receiver) = watch::channel(None);
@@ -98,6 +100,49 @@ pub(super) async fn run(port: u16, expose: bool, config: ConfigReceiver) -> Resu
         .with_state(ProxyState {
             admin_pathfinder_html: Html(render_pathfinder(port, "/admin")),
             gateway,
+        });
+
+    let host = if expose {
+        format!("0.0.0.0:{port}")
+    } else {
+        format!("127.0.0.1:{port}")
+    };
+    let address: std::net::SocketAddr = host.parse().expect("we just defined it above, it _must work_");
+
+    let listener = tokio::net::TcpListener::bind(&address).await.unwrap();
+    axum::serve(listener, app)
+        .await
+        .map_err(|error| crate::Error::internal(error.to_string()))?;
+
+    Ok(())
+}
+
+pub(super) async fn static_graph_run(
+    port: u16,
+    expose: bool,
+    config: engine_v2::VersionedConfig,
+) -> Result<(), crate::Error> {
+    let gateway = Arc::new(Gateway::new(
+        config.into_latest().into(),
+        EngineEnv {
+            fetcher: runtime_local::NativeFetcher::runtime_fetcher(),
+        },
+        GatewayEnv {
+            kv: runtime_local::InMemoryKvStore::runtime(),
+            cache: runtime_local::InMemoryCache::runtime(runtime::cache::GlobalCacheConfig {
+                common_cache_tags: vec![],
+                enabled: true,
+                subdomain: "localhost".to_string(),
+            }),
+        },
+    ));
+
+    let app = axum::Router::new()
+        .route("/graphql", get(engine_get).post(engine_post))
+        .layer(CorsLayer::permissive())
+        .with_state(ProxyState {
+            admin_pathfinder_html: Html(render_pathfinder(port, "/admin")),
+            gateway: constant_watch_receiver(Some(gateway)),
         });
 
     let host = if expose {

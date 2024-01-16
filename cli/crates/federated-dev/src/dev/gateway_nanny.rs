@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use crate::ConfigReceiver;
+use crate::ConfigWatcher;
 
-use super::bus::{GatewaySender, GraphReceiver};
+use super::bus::{GatewaySender, GraphWatcher};
 use engine_v2::EngineEnv;
 use futures_concurrency::stream::Merge;
 use futures_util::{stream::BoxStream, StreamExt};
@@ -12,13 +12,13 @@ use tokio_stream::wrappers::WatchStream;
 /// The GatewayNanny looks after the `Gateway` - on updates to the graph or config it'll
 /// create a new `Gateway` and publish it on the gateway channel
 pub(crate) struct GatewayNanny {
-    graph: GraphReceiver,
-    config: ConfigReceiver,
+    graph: GraphWatcher,
+    config: ConfigWatcher,
     sender: GatewaySender,
 }
 
 impl GatewayNanny {
-    pub fn new(graph: GraphReceiver, config: ConfigReceiver, sender: GatewaySender) -> Self {
+    pub fn new(graph: GraphWatcher, config: ConfigWatcher, sender: GatewaySender) -> Self {
         Self { graph, config, sender }
     }
 
@@ -41,7 +41,7 @@ impl GatewayNanny {
     }
 }
 
-async fn new_gateway(graph: &GraphReceiver, config: &ConfigReceiver) -> Option<Arc<Gateway>> {
+async fn new_gateway(graph: &GraphWatcher, config: &ConfigWatcher) -> Option<Arc<Gateway>> {
     let graph = graph.borrow().clone()?;
 
     let config = engine_config_builder::build_config(&config.borrow(), graph);
