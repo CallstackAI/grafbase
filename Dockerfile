@@ -28,7 +28,7 @@ FROM alpine:3.19
 
 WORKDIR /grafbase
 
-RUN apk add --no-cache nodejs npm
+RUN apk add --no-cache nodejs npm curl
 
 RUN adduser -g wheel -D grafbase -h "/data" && mkdir -p /data && chown grafbase: /data
 USER grafbase
