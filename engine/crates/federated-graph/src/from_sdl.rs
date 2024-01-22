@@ -535,6 +535,15 @@ fn ingest_field<'a>(parent_id: Definition, ast_field: &'a ast::FieldDefinition, 
         .iter()
         .filter(|dir| dir.node.name.node == JOIN_FIELD_DIRECTIVE_NAME)
         .filter(|dir| dir.node.get_argument("overrides").is_none())
+        .filter(|dir| {
+            !dir.node
+                .get_argument("external")
+                .map(|arg| match &arg.node {
+                    async_graphql_value::ConstValue::Boolean(b) => *b,
+                    _ => false,
+                })
+                .unwrap_or_default()
+        })
         .filter_map(|dir| dir.node.get_argument("graph"))
         .filter_map(|arg| match &arg.node {
             async_graphql_value::ConstValue::Enum(s) => Some(state.graph_sdl_names[s.as_str()]),
