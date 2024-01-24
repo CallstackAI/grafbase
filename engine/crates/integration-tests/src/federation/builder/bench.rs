@@ -19,6 +19,7 @@ pub struct FederationGatewayBench<'a> {
     gateway: Arc<gateway_v2::Gateway>,
     query: &'a str,
     ctx: Arc<RequestContext>,
+    response_index: Arc<AtomicUsize>,
 }
 
 impl<'a> FederationGatewayBench<'a> {
@@ -26,6 +27,7 @@ impl<'a> FederationGatewayBench<'a> {
     where
         I: IntoIterator<Item = T>,
     {
+        let response_index = Arc::new(AtomicUsize::new(0));
         let fetcher = DummyFetcher::create(
             subgraphs_responses
                 .into_iter()
@@ -33,6 +35,7 @@ impl<'a> FederationGatewayBench<'a> {
                     bytes: serde_json::to_vec(&resp).unwrap().into(),
                 })
                 .collect(),
+            response_index.clone(),
         );
         let FederatedGraph::V1(federated_graph) = FederatedGraph::from_sdl(schema).unwrap();
         let config = engine_v2::VersionedConfig::V1(federated_graph).into_latest();
@@ -53,16 +56,21 @@ impl<'a> FederationGatewayBench<'a> {
             gateway: Arc::new(gateway),
             query,
             ctx,
+            response_index,
         }
     }
 
     pub async fn execute(&self) -> Response {
+        self.response_index.store(0, Ordering::Relaxed);
         let session = self.gateway.authorize(RequestHeaders::default()).await.unwrap();
         let response = session
             .execute(self.ctx.as_ref(), engine::Request::new(self.query))
             .await;
-        assert!(response.status.is_success());
-        assert!(!response.has_errors);
+        assert!(
+            response.status.is_success() && !response.has_errors,
+            "Execution failed!\n{}",
+            String::from_utf8_lossy(&response.bytes)
+        );
         response
     }
 }
@@ -73,10 +81,10 @@ struct DummyFetcher {
 }
 
 impl DummyFetcher {
-    fn create(responses: Vec<FetchResponse>) -> runtime::fetch::Fetcher {
+    fn create(responses: Vec<FetchResponse>, index: Arc<AtomicUsize>) -> runtime::fetch::Fetcher {
         runtime::fetch::Fetcher::new(Self {
             responses: Arc::new(responses),
-            index: Arc::new(AtomicUsize::new(0)),
+            index,
         })
     }
 }
@@ -88,9 +96,7 @@ impl runtime::fetch::FetcherInner for DummyFetcher {
             .responses
             .get(self.index.fetch_add(1, Ordering::Relaxed))
             .cloned()
-            .unwrap_or(FetchResponse {
-                bytes: Default::default(),
-            }))
+            .expect("No more responses"))
     }
 
     async fn stream(

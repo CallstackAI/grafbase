@@ -94,6 +94,7 @@ impl<'ctx> FederationEntityExecutor<'ctx> {
             })
             .await?
             .bytes;
+        tracing::debug!("{}", String::from_utf8_lossy(&bytes));
         let err_path = self.response_boundary[0].response_path.child(
             self.ctx
                 .walker
