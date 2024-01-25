@@ -44,7 +44,7 @@ fn main() {
         .route("/graphql3", post(engine_post3))
         .with_state((gateway, runtime_local::NativeFetcher::runtime_fetcher()));
 
-    let address: std::net::SocketAddr = format!("0.0.0.0:5000")
+    let address: std::net::SocketAddr = format!("0.0.0.0:5543")
         .parse()
         .expect("we just defined it above, it _must work_");
 
@@ -168,47 +168,47 @@ async fn engine_post3(State((_, fetcher)): State<(Arc<Gateway>, Fetcher)>) -> im
 
     try_join!(req1, req2).unwrap();
 
-    // fetcher
-    //     .post(runtime::fetch::FetchRequest {
-    //         url: &url::Url::parse("http://127.0.0.1:4001/graphql").unwrap(),
-    //         headers: Default::default(),
-    //         json_body: serde_json::to_string(&serde_json::json!({
-    //                     "query": r#"
-    //         query Plan3($representationsPlan3: [_Any!]!) {
-    //             _entities(representations: $representationsPlan3) {
-    //                 __typename
-    //                 ... on User  {
-    //                     name
-    //                 }
-    //             }
-    //         }
-    //         "#,
-    //         "variables": {
-    //           "representationsPlan3": [
-    //             {
-    //               "__typename": "User",
-    //               "id": "1"
-    //             },
-    //             {
-    //               "__typename": "User",
-    //               "id": "2"
-    //             },
-    //             {
-    //               "__typename": "User",
-    //               "id": "1"
-    //             },
-    //             {
-    //               "__typename": "User",
-    //               "id": "2"
-    //             }
-    //           ]
-    //         }
-    //         }))
-    //         .unwrap(),
-    //     })
-    //     .await
-    //     .unwrap()
-    //     .bytes;
+    fetcher
+        .post(runtime::fetch::FetchRequest {
+            url: &url::Url::parse("http://127.0.0.1:4001/graphql").unwrap(),
+            headers: Default::default(),
+            json_body: serde_json::to_string(&serde_json::json!({
+                        "query": r#"
+            query Plan3($representationsPlan3: [_Any!]!) {
+                _entities(representations: $representationsPlan3) {
+                    __typename
+                    ... on User  {
+                        name
+                    }
+                }
+            }
+            "#,
+            "variables": {
+              "representationsPlan3": [
+                {
+                  "__typename": "User",
+                  "id": "1"
+                },
+                {
+                  "__typename": "User",
+                  "id": "2"
+                },
+                {
+                  "__typename": "User",
+                  "id": "1"
+                },
+                {
+                  "__typename": "User",
+                  "id": "2"
+                }
+              ]
+            }
+            }))
+            .unwrap(),
+        })
+        .await
+        .unwrap()
+        .bytes;
 
     let bytes =
         serde_json::to_vec(&serde_json::json!({"data":{"topProducts":[{"upc":"1","name":"Table","price":899,"inStock":true,"reviews":[{"id":"1","body":"Love it!","author":{"id":"1","name":"Ada Lovelace","username":"@ada"}},{"id":"4","body":"Prefer something else.","author":{"id":"2","name":"Alan Turing","username":"@complete"}}]},{"upc":"2","name":"Couch","price":1299,"inStock":false,"reviews":[{"id":"2","body":"Too expensive.","author":{"id":"1","name":"Ada Lovelace","username":"@ada"}}]},{"upc":"3","name":"Chair","price":54,"inStock":true,"reviews":[{"id":"3","body":"Could be better.","author":{"id":"2","name":"Alan Turing","username":"@complete"}}]}]}}
