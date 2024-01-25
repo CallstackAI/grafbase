@@ -31,6 +31,8 @@ futures-util.workspace = true
 hex = "0.4.3"
 url.workspace = true
 tracing.workspace = true
+fnv = "1"
+tokio.workspace = true
 
 config = { package = "engine-v2-config", path = "./config" }
 engine-value = { path = "../engine/value" }

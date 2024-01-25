@@ -88,13 +88,13 @@ async fn engine_post(
         // wait_until_sender: sender,
     };
 
-    let response = gateway.unchecked_engine_execute(&ctx, request).await;
+    // let response = gateway.unchecked_engine_execute(&ctx, request).await;
 
-    // let session = gateway.authorize(ctx.headers_as_map().into()).await;
-    // let response = match session {
-    //     Some(session) => session.execute(&ctx, request).await,
-    //     None => gateway_v2::Response::unauthorized(),
-    // };
+    let session = gateway.authorize(ctx.headers_as_map().into()).await;
+    let response = match session {
+        Some(session) => session.execute(&ctx, request).await,
+        None => gateway_v2::Response::unauthorized(),
+    };
 
     // tokio::spawn(wait(receiver));
     (response.status, response.headers, response.bytes).into_response()

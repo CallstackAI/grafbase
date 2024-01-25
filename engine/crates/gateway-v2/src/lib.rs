@@ -47,7 +47,7 @@ impl Gateway {
     // The Engine is directly accessible
     pub async fn unchecked_engine_execute(&self, ctx: &impl RequestContext, request: Request) -> Response {
         let request_headers = build_request_headers(ctx.headers());
-        let response = self.engine.execute(request, request_headers).await;
+        let response = self.engine.execute(request, request_headers).await.await;
         let has_errors = response.has_errors();
         match serde_json::to_vec(&response) {
             Ok(bytes) => Response {
@@ -109,7 +109,7 @@ pub struct Session {
 
 impl Session {
     pub async fn execute(self, ctx: &impl RequestContext, request: Request) -> Response {
-        let prepared_execution = self.gateway.engine.execute(request, self.headers);
+        let prepared_execution = self.gateway.engine.execute(request, self.headers).await;
         let cached_response = match self.gateway.build_cache_key(&prepared_execution, &self.token) {
             Some(key) => {
                 self.gateway

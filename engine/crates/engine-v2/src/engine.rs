@@ -6,6 +6,7 @@ use engine_parser::types::OperationType;
 use futures::channel::mpsc;
 use futures_util::{SinkExt, Stream};
 use schema::Schema;
+use tokio::sync::RwLock;
 
 use crate::{
     execution::{ExecutorCoordinator, PreparedExecution, PreparedRequest, Variables},
@@ -18,6 +19,7 @@ pub struct Engine {
     // needs access to the schema strings
     pub(crate) schema: Arc<Schema>,
     pub(crate) env: EngineEnv,
+    op_cache: RwLock<fnv::FnvHashMap<String, Arc<Operation>>>,
 }
 
 pub struct EngineEnv {
@@ -29,11 +31,12 @@ impl Engine {
         Self {
             schema: Arc::new(schema),
             env,
+            op_cache: Default::default(),
         }
     }
 
-    pub fn execute(self: &Arc<Self>, mut request: engine::Request, headers: RequestHeaders) -> PreparedExecution {
-        let operation = match self.prepare_operation(&request) {
+    pub async fn execute(self: &Arc<Self>, mut request: engine::Request, headers: RequestHeaders) -> PreparedExecution {
+        let operation = match self.cached_prepare_operation(&request).await {
             Ok(operation) => operation,
             Err(error) => {
                 return PreparedExecution::bad_request(Response::from_error(error, ExecutionMetadata::default()))
@@ -111,9 +114,23 @@ impl Engine {
         Ok(ExecutorCoordinator::new(self, operation, variables, headers))
     }
 
-    fn prepare_operation(&self, request: &engine::Request) -> Result<Operation, GraphqlError> {
+    async fn cached_prepare_operation(&self, request: &engine::Request) -> Result<Arc<Operation>, GraphqlError> {
+        let guard = self.op_cache.read().await;
+        if let Some(operation) = guard.get(&request.query).cloned() {
+            Ok(operation)
+        } else {
+            drop(guard);
+            let operation = self.prepare_operation(request)?;
+            self.op_cache
+                .write()
+                .await
+                .insert(request.query.clone(), Arc::clone(&operation));
+            Ok(operation)
+        }
+    }
+    fn prepare_operation(&self, request: &engine::Request) -> Result<Arc<Operation>, GraphqlError> {
         let unbound_operation = parse_operation(request)?;
         let operation = Operation::build(&self.schema, unbound_operation)?;
-        Ok(operation)
+        Ok(Arc::new(operation))
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use async_runtime::make_send_on_wasm;
 use engine::RequestHeaders;
@@ -22,7 +22,7 @@ pub type ResponseSender = futures::channel::mpsc::Sender<Response>;
 
 pub struct ExecutorCoordinator<'ctx> {
     engine: &'ctx Engine,
-    operation: Operation,
+    operation: Arc<Operation>,
     variables: Variables,
     request_headers: RequestHeaders,
 }
@@ -30,7 +30,7 @@ pub struct ExecutorCoordinator<'ctx> {
 impl<'ctx> ExecutorCoordinator<'ctx> {
     pub fn new(
         engine: &'ctx Engine,
-        operation: Operation,
+        operation: Arc<Operation>,
         variables: Variables,
         request_headers: RequestHeaders,
     ) -> Self {

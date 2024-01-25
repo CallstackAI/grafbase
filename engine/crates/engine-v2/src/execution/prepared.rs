@@ -28,7 +28,7 @@ pub struct BadRequest {
 }
 
 pub struct PreparedRequest {
-    pub(crate) operation: Operation,
+    pub(crate) operation: Arc<Operation>,
     pub(crate) variables: Variables,
     // Keeping the original query for a simpler hash.
     pub(crate) query: String,
