@@ -34,7 +34,7 @@ impl From<Config> for Schema {
             input_values: vec![],
             data_sources: DataSources {
                 federation: federation::DataSource {
-                    subgraphs: graph.subgraphs.into_iter().map(Into::into).collect(),
+                    subgraphs: Vec::with_capacity(0),
                 },
                 ..Default::default()
             },
@@ -42,6 +42,16 @@ impl From<Config> for Schema {
             cache_configs: vec![],
             auth_config: config.auth,
         };
+
+        schema.data_sources.federation.subgraphs = graph
+            .subgraphs
+            .into_iter()
+            .map(|subgraph| federation::Subgraph {
+                name: subgraph.name.into(),
+                url: url::Url::parse(&schema[StringId::from(subgraph.url)]).unwrap(),
+                headers: vec![],
+            })
+            .collect();
 
         schema.strings.extend(config.strings);
         for (id, config) in config.subgraph_configs {
@@ -320,16 +330,6 @@ impl From<Config> for Schema {
 
         // -- INTROSPECTION --
         introspection::Introspection::finalize_schema(schema)
-    }
-}
-
-impl From<federated_graph::Subgraph> for federation::Subgraph {
-    fn from(subgraph: federated_graph::Subgraph) -> Self {
-        federation::Subgraph {
-            name: subgraph.name.into(),
-            url: subgraph.url.into(),
-            headers: vec![],
-        }
     }
 }
 

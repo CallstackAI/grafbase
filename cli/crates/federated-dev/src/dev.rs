@@ -223,11 +223,11 @@ async fn handle_engine_request(
         .and_then(|value| value.to_str().ok())
         .and_then(StreamingFormat::from_accept_header);
 
-    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+    // let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
     let ctx = RequestContext {
         ray_id: ulid::Ulid::new().to_string(),
         headers,
-        wait_until_sender: sender,
+        // wait_until_sender: sender,
     };
 
     let session = gateway.authorize(ctx.headers_as_map().into()).await;
@@ -247,7 +247,7 @@ async fn handle_engine_request(
             }
         };
 
-        tokio::spawn(wait(receiver));
+        // tokio::spawn(wait(receiver));
 
         return (headers, axum::body::Body::from_stream(stream)).into_response();
     }
@@ -257,7 +257,7 @@ async fn handle_engine_request(
         None => gateway_v2::Response::unauthorized(),
     };
 
-    tokio::spawn(wait(receiver));
+    // tokio::spawn(wait(receiver));
     (response.status, response.headers, response.bytes).into_response()
 }
 
@@ -265,7 +265,7 @@ async fn handle_engine_request(
 struct RequestContext {
     ray_id: String,
     headers: http::HeaderMap,
-    wait_until_sender: UnboundedSender<BoxFuture<'static, ()>>,
+    // wait_until_sender: UnboundedSender<BoxFuture<'static, ()>>,
 }
 
 #[async_trait::async_trait]
@@ -275,9 +275,10 @@ impl runtime::context::RequestContext for RequestContext {
     }
 
     async fn wait_until(&self, fut: BoxFuture<'static, ()>) {
-        self.wait_until_sender
-            .send(fut)
-            .expect("Channel is not closed before finishing all wait_until");
+        tokio::runtime::Handle::current().spawn(fut);
+        // self.wait_until_sender
+        //     .send(fut)
+        //     .expect("Channel is not closed before finishing all wait_until");
     }
 
     fn headers(&self) -> &http::HeaderMap {

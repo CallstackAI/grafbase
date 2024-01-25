@@ -60,7 +60,7 @@ impl<'ctx> GraphqlSubscriptionExecutor<'ctx> {
             // We need a different URL for websockets vs normal HTTP calls.
             // For now we're just figuring out the URL based on what I've done in tests,
             // when we add config we can use the actual URL users provide.
-            let mut url = Url::parse(subgraph.url()).expect("This is a temporary hack");
+            let mut url = subgraph.url().clone();
             url.set_scheme("ws").expect("this to work");
             url.set_path("ws");
             url.to_string()

@@ -1860,6 +1860,7 @@ dependencies = [
  "engine-v2-config",
  "graphql-federated-graph",
  "strum",
+ "url",
 ]
 
 [[package]]
@@ -2371,6 +2372,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "ulid",
+ "url",
 ]
 
 [[package]]
@@ -5564,6 +5566,7 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "ulid",
+ "url",
 ]
 
 [[package]]

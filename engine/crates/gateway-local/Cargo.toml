@@ -18,6 +18,7 @@ engine-v2 = { path = "../engine-v2" }
 gateway-v2 = { path = "../gateway-v2" }
 federated-graph = { package = "graphql-federated-graph", path = "../federated-graph" }
 ulid.workspace = true
+url.workspace = true
 bytes.workspace = true
 serde_json.workspace = true
 runtime.workspace = true

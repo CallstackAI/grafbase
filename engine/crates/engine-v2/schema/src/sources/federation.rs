@@ -8,7 +8,7 @@ pub struct DataSource {
 #[derive(Debug)]
 pub struct Subgraph {
     pub name: StringId,
-    pub url: StringId,
+    pub url: url::Url,
     pub headers: Vec<HeaderId>,
 }
 
@@ -106,8 +106,8 @@ impl<'a> SubgraphWalker<'a> {
         &self.schema[self.item.name]
     }
 
-    pub fn url(&self) -> &'a str {
-        &self.schema[self.item.url]
+    pub fn url(&self) -> &'a url::Url {
+        &self.item.url
     }
 
     pub fn headers(&self) -> impl Iterator<Item = SubgraphHeaderWalker<'a>> + '_ {
