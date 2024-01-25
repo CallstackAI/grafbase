@@ -118,12 +118,12 @@ worker-env = { path = "engine/crates/worker-env" }
 debug = true
 
 [profile.release]
-debug = true
-# strip = "symbols"
+# debug = true
+strip = "symbols"
 # by enabling link-time optimization, we can reduce size even further
 # by telling cargo to optimize at the link stage (in addition to the
 # normal optimizations during the compilation stage)
-# lto = "thin"
+lto = "thin"
 
 [workspace.lints.rust]
 nonstandard-style = "deny"
