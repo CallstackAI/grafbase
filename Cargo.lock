@@ -2352,6 +2352,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-local"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bytes",
+ "engine",
+ "engine-v2",
+ "futures-util",
+ "gateway-v2",
+ "graphql-federated-graph",
+ "http 1.0.0",
+ "runtime",
+ "runtime-local",
+ "serde_json",
+ "tokio",
+ "ulid",
+]
+
+[[package]]
 name = "gateway-v2"
 version = "0.0.0"
 dependencies = [

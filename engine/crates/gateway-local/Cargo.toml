@@ -1,0 +1,29 @@
+[package]
+name = "gateway-local"
+authors = ["Grafbase"]
+description = "Gateway local"
+edition = "2021"
+license = "MPL-2.0"
+homepage = "https://grafbase.com"
+repository = "https://github.com/grafbase/grafbase"
+keywords = ["graphql", "engine", "grafbase"]
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+engine = { path = "../engine" }
+engine-v2 = { path = "../engine-v2" }
+gateway-v2 = { path = "../gateway-v2" }
+federated-graph = { package = "graphql-federated-graph", path = "../federated-graph" }
+ulid.workspace = true
+bytes.workspace = true
+serde_json.workspace = true
+runtime.workspace = true
+runtime-local.workspace = true
+futures-util.workspace = true
+http.workspace = true
+axum.workspace = true
+tokio = { workspace = true, features = ["full"] }
+
