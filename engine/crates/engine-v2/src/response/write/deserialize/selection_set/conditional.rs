@@ -1,6 +1,9 @@
-use std::{borrow::Cow, collections::VecDeque, fmt};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, VecDeque},
+    fmt,
+};
 
-use fnv::FnvHashMap;
 use schema::{DataType, FieldId, ObjectId, Schema};
 use serde::de::{DeserializeSeed, IgnoredAny, MapAccess, Visitor};
 
@@ -119,8 +122,8 @@ impl<'ctx, 'parent> ConditionalSelectionSetSeed<'ctx, 'parent> {
     ) -> RuntimeConcreteSelectionSet {
         let plan = self.ctx.plan;
         let schema = plan.schema();
-        let mut fields = FnvHashMap::<ResponseKey, GroupForResponseKey>::default();
-        let mut typename_fields = FnvHashMap::<ResponseKey, ResponseEdge>::default();
+        let mut fields = HashMap::<ResponseKey, GroupForResponseKey>::default();
+        let mut typename_fields = HashMap::<ResponseKey, ResponseEdge>::default();
 
         for selection_set_id in selection_sets {
             let selection_set = &plan[*selection_set_id];

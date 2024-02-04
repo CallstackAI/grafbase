@@ -18,6 +18,7 @@ default = []
 plan_cache = ["dep:moka"]
 
 [dependencies]
+# ahash = "0.8"
 async-runtime.workspace = true
 futures.workspace = true
 im = "15"
@@ -34,7 +35,6 @@ thiserror.workspace = true
 futures-util.workspace = true
 hex = "0.4.3"
 tracing.workspace = true
-fnv.workspace = true
 moka = { version = "0.12", optional = true, features = ["sync"] }
 
 config = { package = "engine-v2-config", path = "./config" }

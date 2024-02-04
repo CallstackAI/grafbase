@@ -1,6 +1,6 @@
 use engine_parser::types::OperationType;
-use fnv::{FnvHashMap, FnvHashSet};
 use schema::{FieldId, FieldResolverWalker, ResolverId, Schema};
+use std::collections::{HashMap, HashSet};
 use std::{borrow::Cow, collections::hash_map::Entry, num::NonZeroU16};
 
 use super::{
@@ -10,6 +10,7 @@ use super::{
     walker_ext::GroupedByFieldId,
     PlanningError, PlanningResult,
 };
+use crate::request::SelectionSetType;
 use crate::{
     plan::{
         ExecutionPlanId, LogicalPlan, OperationPlan, ParentToChildEdge, PlanBoundaryId, PlanId, PlanInput, PlanOutput,
@@ -26,7 +27,7 @@ use crate::{
 pub(in crate::plan) struct Planner<'schema> {
     pub(super) schema: &'schema Schema,
     pub(super) operation: Operation,
-    extra_field_edges: FnvHashMap<FieldId, ResponseEdge>,
+    extra_field_edges: HashMap<FieldId, ResponseEdge>,
 
     // -- Operation --
     field_attribution: Vec<Option<PlanId>>,
@@ -38,7 +39,7 @@ pub(in crate::plan) struct Planner<'schema> {
     // PlanId -> PlanRootSelectionSet
     plan_root_selection_sets: Vec<PlanRootSelectionSet>,
     // Child -> Parent(s)
-    plan_to_dependencies: FnvHashMap<PlanId, FnvHashSet<PlanId>>,
+    plan_to_dependencies: HashMap<PlanId, HashSet<PlanId>>,
     plan_boundaries_count: usize,
     // PlanId -> Vec<PlanBoundaryId>
     plan_to_children_tmp_boundary_ids: Vec<Vec<TemporaryPlanBoundaryId>>,
@@ -70,7 +71,7 @@ impl<'schema> Planner<'schema> {
     pub fn new(schema: &'schema Schema, operation: Operation) -> Self {
         Self {
             schema,
-            extra_field_edges: FnvHashMap::default(),
+            extra_field_edges: HashMap::default(),
             field_attribution: vec![None; operation.fields.len()],
             selection_set_attribution: vec![None; operation.selection_sets.len()],
             operation,
@@ -80,7 +81,7 @@ impl<'schema> Planner<'schema> {
             plan_boundaries_count: 0,
             plan_to_children_tmp_boundary_ids: Vec::new(),
             plan_to_parent_tmp_boundary_id: Vec::new(),
-            plan_to_dependencies: FnvHashMap::default(),
+            plan_to_dependencies: HashMap::default(),
         }
     }
 
@@ -327,13 +328,19 @@ impl<'schema> Planner<'schema> {
         resolver_id: ResolverId,
         selection_set: FlatSelectionSet,
     ) -> PlanningResult<()> {
-        if let Some(subselections) = self.walker().flatten_subselection_sets(&selection_set.fields) {
+        let mut selection_sets = HashMap::<SelectionSetType, Vec<BoundSelectionSetId>>::new();
+        for field in selection_set.fields {
+            if let Some(id) = self.operation[field.bound_field_id].selection_set_id() {
+                selection_sets.entry(self.operation[id].ty).or_default().push(id);
+            }
+        }
+        for ids in selection_sets.into_values() {
             let logic = AttributionLogic::CompatibleResolver {
                 plan_id,
                 resolver: self.schema.walk(resolver_id),
                 providable: Default::default(),
             };
-            self.recursive_plan_children(path, &logic, subselections)?;
+            self.recursive_plan_children(path, &logic, ids)?;
         }
         Ok(())
     }
@@ -376,7 +383,7 @@ impl<'schema> Planner<'schema> {
         &mut self,
         query_path: &QueryPath,
         logic: &AttributionLogic<'schema>,
-        providable: FnvHashMap<FieldId, GroupedByFieldId>,
+        providable: HashMap<FieldId, GroupedByFieldId>,
         missing: FlatSelectionSet,
     ) -> PlanningResult<()> {
         let parent = BoundaryParent { logic, providable };

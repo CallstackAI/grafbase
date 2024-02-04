@@ -1,7 +1,6 @@
 use schema::FieldId;
 use std::borrow::Borrow;
-
-use fnv::FnvHashMap;
+use std::collections::HashMap;
 
 use crate::{
     request::{BoundFieldId, BoundSelectionSetId, OperationWalker},
@@ -20,7 +19,7 @@ impl<'a> OperationWalker<'a> {
     pub(super) fn group_by_response_key<Item: Borrow<BoundFieldId>>(
         &self,
         items: impl IntoIterator<Item = Item>,
-    ) -> FnvHashMap<ResponseKey, GroupForResponseKey<Item>> {
+    ) -> HashMap<ResponseKey, GroupForResponseKey<Item>> {
         let operation = self.as_ref();
         items.into_iter().fold(Default::default(), |mut groups, item| {
             let id = *item.borrow();
@@ -60,7 +59,7 @@ impl<'a> OperationWalker<'a> {
     pub(super) fn group_by_schema_field_id<Item: Borrow<BoundFieldId>>(
         &self,
         fields: impl IntoIterator<Item = Item>,
-    ) -> FnvHashMap<FieldId, GroupedByFieldId> {
+    ) -> HashMap<FieldId, GroupedByFieldId> {
         let operation = self.as_ref();
         fields.into_iter().fold(Default::default(), |mut map, id| {
             let id = *id.borrow();

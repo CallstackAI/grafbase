@@ -1,6 +1,8 @@
-use std::{borrow::Cow, collections::hash_map::Entry};
+use std::{
+    borrow::Cow,
+    collections::{hash_map::Entry, HashMap},
+};
 
-use fnv::FnvHashMap;
 use schema::{FieldId, FieldResolverWalker, FieldSet, FieldSetItem, ResolverId, ResolverWalker};
 
 use super::{
@@ -57,7 +59,7 @@ impl<'schema, 'a> BoundaryPlanner<'schema, 'a> {
 
 pub(super) struct BoundaryParent<'schema, 'a> {
     pub logic: &'a AttributionLogic<'schema>,
-    pub providable: FnvHashMap<FieldId, GroupedByFieldId>,
+    pub providable: HashMap<FieldId, GroupedByFieldId>,
 }
 
 impl<'schema, 'a> std::ops::Deref for BoundaryPlanner<'schema, 'a> {
@@ -73,7 +75,7 @@ impl<'schema, 'a> std::ops::DerefMut for BoundaryPlanner<'schema, 'a> {
     }
 }
 
-type BoundaryFields = FnvHashMap<FieldId, BoundaryField>;
+type BoundaryFields = HashMap<FieldId, BoundaryField>;
 
 #[derive(Debug)]
 struct BoundaryField {
@@ -128,11 +130,11 @@ impl<'schema, 'a> BoundaryPlanner<'schema, 'a> {
     ) -> PlanningResult<Vec<PlanId>> {
         // Fields that couldn't be provided by the parent and that have yet to be planned by one
         // child plan.
-        let mut id_to_missing_fields: FnvHashMap<BoundFieldId, MissingField<'schema>> =
+        let mut id_to_missing_fields: HashMap<BoundFieldId, MissingField<'schema>> =
             self.build_missing_fields(std::mem::replace(&mut selection_set.fields, Vec::with_capacity(0)));
 
         // Actual planning, we plan one child plan at a time.
-        let mut candidates: FnvHashMap<ResolverId, ChildPlanCandidate<'schema>> = FnvHashMap::default();
+        let mut candidates: HashMap<ResolverId, ChildPlanCandidate<'schema>> = HashMap::default();
         while !id_to_missing_fields.is_empty() {
             candidates.clear();
             self.generate_all_candidates(id_to_missing_fields.values(), boundary_fields, &mut candidates);
@@ -231,9 +233,9 @@ impl<'schema, 'a> BoundaryPlanner<'schema, 'a> {
             .collect()
     }
 
-    fn build_missing_fields(&self, fields: Vec<FlatField>) -> FnvHashMap<BoundFieldId, MissingField<'schema>> {
+    fn build_missing_fields(&self, fields: Vec<FlatField>) -> HashMap<BoundFieldId, MissingField<'schema>> {
         let walker = self.schema.walker();
-        let mut id_to_missing_fields = FnvHashMap::default();
+        let mut id_to_missing_fields = HashMap::default();
         for field in fields {
             let entity_type = match self.operation[field.parent_selection_set_id()].ty {
                 SelectionSetType::Object(id) => EntityType::Object(id),
@@ -260,7 +262,7 @@ impl<'schema, 'a> BoundaryPlanner<'schema, 'a> {
         &mut self,
         missing_fields: impl IntoIterator<Item = &'field MissingField<'schema>>,
         boundary_fields: &mut BoundaryFields,
-        candidates: &mut FnvHashMap<ResolverId, ChildPlanCandidate<'schema>>,
+        candidates: &mut HashMap<ResolverId, ChildPlanCandidate<'schema>>,
     ) where
         'schema: 'field,
     {
@@ -501,7 +503,7 @@ impl<'schema, 'a> BoundaryPlanner<'schema, 'a> {
 }
 
 fn select_best_child_plan<'c, 'op>(
-    candidates: &'c mut FnvHashMap<ResolverId, ChildPlanCandidate<'op>>,
+    candidates: &'c mut HashMap<ResolverId, ChildPlanCandidate<'op>>,
 ) -> Option<&'c mut ChildPlanCandidate<'op>> {
     // We could be smarter, but we need to be sure there is no intersection between
     // candidates (which impacts ordering among other things) and some fields may now be
