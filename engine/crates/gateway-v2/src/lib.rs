@@ -50,7 +50,7 @@ impl Gateway {
         let request_headers = build_request_headers(ctx.headers());
         let response = self.engine.execute(request, request_headers).await;
         let has_errors = response.has_errors();
-        match serde_json::to_vec(&response) {
+        match simd_json::to_vec(&response) {
             Ok(bytes) => Response {
                 status: http::StatusCode::OK,
                 headers: http::HeaderMap::new(),
@@ -117,16 +117,13 @@ impl Session {
                     .env
                     .cache
                     .cached_execution(ctx, key, async move {
-                        prepared_execution
-                            .await
-                            .into_cacheable(serde_json::to_vec)
-                            .map(Arc::new)
+                        prepared_execution.await.into_cacheable(simd_json::to_vec).map(Arc::new)
                     })
                     .await
             }
             None => prepared_execution
                 .await
-                .into_cacheable(serde_json::to_vec)
+                .into_cacheable(simd_json::to_vec)
                 .map(|response| CachedExecutionResponse::Origin {
                     response: Arc::new(response),
                     cache_read: CacheReadStatus::Bypass,

@@ -12,3 +12,4 @@ grafbase
 .idea
 /cli/target
 /engine/target
+/grafbase

@@ -26,6 +26,12 @@ pub(crate) struct GraphqlExecutionPlan {
     operation: PreparedGraphqlOperation,
 }
 
+#[derive(serde::Serialize)]
+struct GraphqlQuery<'a> {
+    query: &'a str,
+    variables: OutboundVariables<'a>,
+}
+
 impl GraphqlExecutionPlan {
     pub fn build(resolver: RootFieldResolverWalker<'_>, plan: PlanWalker<'_>) -> PlanningResult<ExecutionPlan> {
         let subgraph = resolver.subgraph();
@@ -54,10 +60,10 @@ impl GraphqlExecutionPlan {
             self.operation.query,
             serde_json::to_string_pretty(&variables).unwrap_or_default()
         );
-        let json_body = serde_json::to_string(&serde_json::json!({
-            "query": self.operation.query,
-            "variables": variables
-        }))
+        let json_body = simd_json::to_string(&GraphqlQuery {
+            query: &self.operation.query,
+            variables,
+        })
         .map_err(|err| format!("Failed to serialize query: {err}"))?;
 
         Ok(Executor::GraphQL(GraphqlExecutor {
@@ -107,6 +113,7 @@ impl<'ctx> GraphqlExecutor<'ctx> {
             })
             .await?
             .bytes;
+        let mut bytes = Vec::from(bytes);
         tracing::debug!("{}", String::from_utf8_lossy(&bytes));
         let err_path = self.plan.root_error_path(&self.response_boundary_item.response_path);
         let seed_ctx = self.plan.new_seed(&mut self.response_part);
@@ -114,7 +121,7 @@ impl<'ctx> GraphqlExecutor<'ctx> {
             &seed_ctx,
             &err_path,
             seed_ctx.create_root_seed(&self.response_boundary_item),
-            &mut serde_json::Deserializer::from_slice(&bytes),
+            &mut simd_json::Deserializer::from_slice(&mut bytes[..]).unwrap(),
         );
 
         Ok(self.response_part)

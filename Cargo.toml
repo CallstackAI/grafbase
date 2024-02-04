@@ -68,6 +68,7 @@ rmp-serde = "1"
 rstest = "0.18"
 secrecy = "0.8"
 send_wrapper = "0.6"
+simd-json = { version = "0.13", features = ["big-int-as-float"]}
 strum = "0.26"
 strum_macros = "0.26"
 tar = "0.4"

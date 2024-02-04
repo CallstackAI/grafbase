@@ -66,10 +66,10 @@ impl FederationEntityExecutionPlan {
             self.operation.query,
             serde_json::to_string_pretty(&variables).unwrap_or_default()
         );
-        let json_body = serde_json::to_string(&serde_json::json!({
-            "query": self.operation.query,
-            "variables": variables
-        }))
+        let json_body = simd_json::to_string(&super::GraphqlQuery {
+            query: &self.operation.query,
+            variables,
+        })
         .map_err(|err| format!("Failed to serialize query: {err}"))?;
 
         Ok(Executor::FederationEntity(FederationEntityExecutor {
@@ -119,6 +119,7 @@ impl<'ctx> FederationEntityExecutor<'ctx> {
             })
             .await?
             .bytes;
+        let mut bytes = Vec::from(bytes);
         tracing::debug!("{}", String::from_utf8_lossy(&bytes));
         let root_err_path = self
             .plan
@@ -131,7 +132,7 @@ impl<'ctx> FederationEntityExecutor<'ctx> {
                 ctx: seed_ctx.clone(),
                 response_boundary: &self.response_boundary_items,
             },
-            &mut serde_json::Deserializer::from_slice(&bytes),
+            &mut simd_json::Deserializer::from_slice(&mut bytes[..]).unwrap(),
         );
 
         Ok(self.response_part)

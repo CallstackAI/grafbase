@@ -22,5 +22,6 @@ log.workspace = true
 runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+simd-json.workspace = true
 headers.workspace = true
 

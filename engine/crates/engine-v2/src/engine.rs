@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use async_runtime::stream::StreamExt as _;
 use engine::RequestHeaders;
@@ -36,7 +36,7 @@ impl Engine {
             plan_cache: moka::sync::Cache::builder()
                 .max_capacity(64)
                 // A cached entry will be expired after the specified duration past from get or insert
-                .time_to_idle(Duration::from_secs(5 * 60))
+                .time_to_idle(std::time::Duration::from_secs(5 * 60))
                 .build(),
         }
     }
@@ -132,7 +132,7 @@ impl Engine {
         let prepared = Arc::new(OperationPlan::prepare(&self.schema, bound_operation)?);
         #[cfg(feature = "plan_cache")]
         {
-            self.plan_cache.insert(request.query.clone(), prepared.clone())
+            self.plan_cache.insert(request.query.clone(), prepared.clone());
         }
         Ok(prepared)
     }
