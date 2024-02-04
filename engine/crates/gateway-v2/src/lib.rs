@@ -12,6 +12,9 @@ use gateway_core::RequestContext;
 use headers::HeaderMapExt;
 use runtime::cache::{CacheReadStatus, CachedExecutionResponse};
 
+#[cfg(feature = "simd-json")]
+use simd_json as serde_json;
+
 pub mod streaming;
 pub mod websockets;
 
@@ -111,6 +114,7 @@ pub struct Session {
 impl Session {
     pub async fn execute(self, ctx: &impl RequestContext, request: Request) -> Response {
         let prepared_execution = self.gateway.engine.execute(request, self.headers);
+
         let cached_response = match self.gateway.build_cache_key(&prepared_execution, &self.token) {
             Some(key) => {
                 self.gateway

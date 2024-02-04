@@ -11,6 +11,9 @@ keywords = ["graphql", "engine", "grafbase"]
 [lints]
 workspace = true
 
+[features]
+simd-json = ["dep:simd-json", "engine-v2/simd-json"]
+
 [dependencies]
 auth = { path = "./auth", package = "gateway-v2-auth" }
 engine = { path = "../engine" }
@@ -22,5 +25,6 @@ log.workspace = true
 runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+simd-json = { workspace = true, optional = true }
 headers.workspace = true
 

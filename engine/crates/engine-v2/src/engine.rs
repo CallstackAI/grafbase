@@ -132,7 +132,7 @@ impl Engine {
         let prepared = Arc::new(OperationPlan::prepare(&self.schema, bound_operation)?);
         #[cfg(feature = "plan_cache")]
         {
-            self.plan_cache.insert(request.query.clone(), prepared.clone())
+            self.plan_cache.insert(request.query.clone(), prepared.clone());
         }
         Ok(prepared)
     }

@@ -16,7 +16,7 @@ cynic.workspace = true
 cynic-introspection.workspace = true
 engine-parser.workspace = true
 engine-v2.workspace = true
-gateway-v2.workspace = true
+gateway-v2 = { workspace = true }
 graphql-mocks.workspace = true
 engine-config-builder = { path = "../engine-config-builder" }
 expect-test = "1.4"
@@ -76,6 +76,7 @@ path = "../runtime"
 path = "../parser-openapi"
 
 [dev-dependencies]
+mimalloc.workspace = true
 similar-asserts = "1.5"
 base64.workspace = true
 rstest.workspace = true

@@ -6,7 +6,39 @@ use serde::{
 };
 
 use super::errors::UpstreamGraphqlErrorsSeed;
-use crate::response::{GraphqlError, ResponsePath, SeedContext};
+use crate::{
+    execution::ExecutionResult,
+    response::{GraphqlError, ResponsePath, SeedContext},
+};
+
+pub fn ingest_json_bytes_into_response<'ctx, DataSeed>(
+    ctx: &SeedContext<'ctx>,
+    root_err_path: &'ctx ResponsePath,
+    seed: DataSeed,
+    bytes: bytes::Bytes,
+) -> ExecutionResult<()>
+where
+    DataSeed: for<'de> DeserializeSeed<'de, Value = ()>,
+{
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "simd-json")] {
+            let mut bytes = Vec::from(bytes);
+            let mut deserializer = match simd_json::Deserializer::from_slice(&mut bytes[..]) {
+                Ok(deserializer) => deserializer,
+                Err(err) => {
+                    return Err(crate::execution::ExecutionError::from(format!(
+                        "Failed to parse response: {err}"
+                    )));
+                }
+            };
+            ingest_deserializer_into_response(ctx, root_err_path, seed, &mut deserializer);
+        } else {
+            let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
+            ingest_deserializer_into_response(ctx, root_err_path, seed, &mut deserializer);
+        }
+    }
+    Ok(())
+}
 
 pub fn ingest_deserializer_into_response<'ctx, 'de, DataSeed, D>(
     ctx: &SeedContext<'ctx>,

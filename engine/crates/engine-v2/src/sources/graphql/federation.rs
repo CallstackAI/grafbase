@@ -5,6 +5,8 @@ use schema::{
     sources::federation::{EntityResolverWalker, SubgraphHeaderValueRef, SubgraphWalker},
     SubgraphId,
 };
+#[cfg(feature = "simd-json")]
+use simd_json as serde_json;
 
 use crate::{
     execution::ExecutionContext,
@@ -14,7 +16,7 @@ use crate::{
 };
 
 use super::{
-    deserialize::{ingest_deserializer_into_response, EntitiesDataSeed},
+    deserialize::{ingest_json_bytes_into_response, EntitiesDataSeed},
     query::PreparedFederationEntityOperation,
 };
 
@@ -44,7 +46,7 @@ impl FederationEntityExecutionPlan {
 
         let boundary_objects_view = boundary_objects_view.with_extra_constant_fields(vec![(
             "__typename".to_string(),
-            serde_json::Value::String(
+            ::serde_json::Value::String(
                 ctx.engine
                     .schema
                     .walker()
@@ -66,10 +68,10 @@ impl FederationEntityExecutionPlan {
             self.operation.query,
             serde_json::to_string_pretty(&variables).unwrap_or_default()
         );
-        let json_body = serde_json::to_string(&serde_json::json!({
-            "query": self.operation.query,
-            "variables": variables
-        }))
+        let json_body = serde_json::to_string(&super::GraphqlQuery {
+            query: &self.operation.query,
+            variables,
+        })
         .map_err(|err| format!("Failed to serialize query: {err}"))?;
 
         Ok(Executor::FederationEntity(FederationEntityExecutor {
@@ -120,19 +122,20 @@ impl<'ctx> FederationEntityExecutor<'ctx> {
             .await?
             .bytes;
         tracing::debug!("{}", String::from_utf8_lossy(&bytes));
+
         let root_err_path = self
             .plan
             .root_error_path(&self.response_boundary_items[0].response_path);
         let seed_ctx = self.plan.new_seed(&mut self.response_part);
-        ingest_deserializer_into_response(
+        ingest_json_bytes_into_response(
             &seed_ctx,
             &root_err_path,
             EntitiesDataSeed {
                 ctx: seed_ctx.clone(),
                 response_boundary: &self.response_boundary_items,
             },
-            &mut serde_json::Deserializer::from_slice(&bytes),
-        );
+            bytes,
+        )?;
 
         Ok(self.response_part)
     }

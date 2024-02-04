@@ -4,6 +4,11 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use integration_tests::federation::FederationGatewayBench;
 use serde_json::json;
 
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 const SCHEMA: &str = r#"
 directive @core(feature: String!) repeatable on SCHEMA
 

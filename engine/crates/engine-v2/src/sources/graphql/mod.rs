@@ -13,6 +13,9 @@ use crate::{
     sources::graphql::query::OutboundVariables,
 };
 
+#[cfg(feature = "simd-json")]
+use simd_json as serde_json;
+
 mod deserialize;
 mod federation;
 mod query;
@@ -24,6 +27,12 @@ pub(crate) use subscription::*;
 pub(crate) struct GraphqlExecutionPlan {
     subgraph_id: SubgraphId,
     operation: PreparedGraphqlOperation,
+}
+
+#[derive(serde::Serialize)]
+struct GraphqlQuery<'a> {
+    query: &'a str,
+    variables: OutboundVariables<'a>,
 }
 
 impl GraphqlExecutionPlan {
@@ -54,10 +63,10 @@ impl GraphqlExecutionPlan {
             self.operation.query,
             serde_json::to_string_pretty(&variables).unwrap_or_default()
         );
-        let json_body = serde_json::to_string(&serde_json::json!({
-            "query": self.operation.query,
-            "variables": variables
-        }))
+        let json_body = serde_json::to_string(&GraphqlQuery {
+            query: &self.operation.query,
+            variables,
+        })
         .map_err(|err| format!("Failed to serialize query: {err}"))?;
 
         Ok(Executor::GraphQL(GraphqlExecutor {
@@ -110,12 +119,12 @@ impl<'ctx> GraphqlExecutor<'ctx> {
         tracing::debug!("{}", String::from_utf8_lossy(&bytes));
         let err_path = self.plan.root_error_path(&self.response_boundary_item.response_path);
         let seed_ctx = self.plan.new_seed(&mut self.response_part);
-        deserialize::ingest_deserializer_into_response(
+        deserialize::ingest_json_bytes_into_response(
             &seed_ctx,
             &err_path,
             seed_ctx.create_root_seed(&self.response_boundary_item),
-            &mut serde_json::Deserializer::from_slice(&bytes),
-        );
+            bytes,
+        )?;
 
         Ok(self.response_part)
     }

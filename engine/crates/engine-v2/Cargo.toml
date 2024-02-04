@@ -19,6 +19,8 @@ plan_cache = ["dep:moka"]
 
 [dependencies]
 async-runtime.workspace = true
+cfg-if.workspace = true
+bytes.workspace = true
 futures.workspace = true
 im = "15"
 indexmap.workspace = true
@@ -28,6 +30,7 @@ serde = { workspace = true, features = ["rc"] }
 serde_with.workspace = true
 serde_json.workspace = true
 serde-value = "0.7"
+simd-json = { workspace = true, optional = true }
 strum.workspace = true
 thiserror.workspace = true
 futures-util.workspace = true
