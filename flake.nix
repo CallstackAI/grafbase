@@ -57,6 +57,7 @@
             # Testing
             cargo-insta
             cargo-nextest
+            hey
 
             # Versioning, automation and releasing
             cargo-about
