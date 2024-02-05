@@ -418,13 +418,14 @@ impl<'schema> Planner<'schema> {
         // -- Collecting fields for the plan output --
         //
         let mut operation_plan = OperationPlan {
-            operation,
             field_attribution,
             selection_set_attribution,
             plan_inputs,
             plan_outputs: Vec::with_capacity(planned_resolvers.len()),
             collected_selection_sets: Vec::with_capacity(planned_resolvers.len()),
             collected_fields: Vec::with_capacity(planned_resolvers.len()),
+            bound_to_collected_selection_set: vec![None; operation.selection_sets.len()],
+            operation,
             conditional_selection_sets: Vec::new(),
             conditional_fields: Vec::new(),
             plans: Vec::with_capacity(planned_resolvers.len()),

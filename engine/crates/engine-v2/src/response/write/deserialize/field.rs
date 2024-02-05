@@ -8,24 +8,21 @@ use super::{
     StringSeed,
 };
 use crate::{
-    plan::FieldType,
-    request::BoundFieldId,
-    response::{GraphqlError, ResponsePath, ResponseValue},
+    plan::{CollectedField, FieldType},
+    response::{GraphqlError, ResponseValue},
 };
 
+#[derive(Clone)]
 pub(super) struct FieldSeed<'ctx, 'parent> {
     pub ctx: &'parent SeedContextInner<'ctx>,
-    pub path: ResponsePath,
-    pub bound_field_id: BoundFieldId,
-    pub ty: &'parent FieldType,
+    pub field: &'parent CollectedField,
     pub wrapping: Wrapping,
 }
 
 macro_rules! deserialize_nullable_scalar {
     ($field: expr, $scalar: expr, $deserializer: expr) => {
         NullableSeed {
-            bound_field_id: $field.bound_field_id,
-            path: &$field.path,
+            bound_field_id: $field.field.bound_field_id,
             ctx: $field.ctx,
             seed: $scalar,
         }
@@ -39,42 +36,24 @@ impl<'de, 'ctx, 'parent> DeserializeSeed<'de> for FieldSeed<'ctx, 'parent> {
     where
         D: serde::Deserializer<'de>,
     {
-        let result = if let Some(list_wrapping) = self.wrapping.list_wrapping.pop() {
+        let result = if let Some(list_wrapping) = self.wrapping.pop_list_wrapping() {
+            let list_seed = ListSeed {
+                bound_field_id: self.field.bound_field_id,
+                ctx: self.ctx,
+                seed: &self,
+            };
             match list_wrapping {
-                ListWrapping::RequiredList => ListSeed {
-                    bound_field_id: self.bound_field_id,
-                    path: &self.path,
-                    ctx: self.ctx,
-                    seed_builder: |path: ResponsePath| FieldSeed {
-                        ctx: self.ctx,
-                        path,
-                        bound_field_id: self.bound_field_id,
-                        ty: self.ty,
-                        wrapping: self.wrapping.clone(),
-                    },
-                }
-                .deserialize(deserializer),
+                ListWrapping::RequiredList => list_seed.deserialize(deserializer),
                 ListWrapping::NullableList => NullableSeed {
-                    bound_field_id: self.bound_field_id,
-                    path: &self.path,
+                    bound_field_id: self.field.bound_field_id,
                     ctx: self.ctx,
-                    seed: ListSeed {
-                        bound_field_id: self.bound_field_id,
-                        path: &self.path,
-                        ctx: self.ctx,
-                        seed_builder: |path: ResponsePath| FieldSeed {
-                            ctx: self.ctx,
-                            path,
-                            bound_field_id: self.bound_field_id,
-                            ty: self.ty,
-                            wrapping: self.wrapping.clone(),
-                        },
-                    },
+                    seed: list_seed,
                 }
                 .deserialize(deserializer),
             }
-        } else if self.wrapping.inner_is_required {
-            match self.ty {
+        } else if self.wrapping.inner_is_required() {
+            self.ctx.push_edge(self.field.edge);
+            let result = match &self.field.ty {
                 FieldType::Scalar(data_type) => match data_type {
                     DataType::String => StringSeed.deserialize(deserializer),
                     DataType::Float => FloatSeed.deserialize(deserializer),
@@ -83,15 +62,17 @@ impl<'de, 'ctx, 'parent> DeserializeSeed<'de> for FieldSeed<'ctx, 'parent> {
                     DataType::JSON => JSONSeed.deserialize(deserializer),
                     DataType::Boolean => BooleanSeed.deserialize(deserializer),
                 },
-                FieldType::SelectionSet(expected) => SelectionSetSeed {
+                FieldType::SelectionSet(collected) => SelectionSetSeed {
                     ctx: self.ctx,
-                    path: &self.path,
-                    collected: expected,
+                    collected,
                 }
                 .deserialize(deserializer),
-            }
+            };
+            self.ctx.pop_edge();
+            result
         } else {
-            match self.ty {
+            self.ctx.push_edge(self.field.edge);
+            let result = match &self.field.ty {
                 FieldType::Scalar(data_type) => match data_type {
                     DataType::String => deserialize_nullable_scalar!(self, StringSeed, deserializer),
                     DataType::Float => deserialize_nullable_scalar!(self, FloatSeed, deserializer),
@@ -100,31 +81,33 @@ impl<'de, 'ctx, 'parent> DeserializeSeed<'de> for FieldSeed<'ctx, 'parent> {
                     DataType::JSON => deserialize_nullable_scalar!(self, JSONSeed, deserializer),
                     DataType::Boolean => deserialize_nullable_scalar!(self, BooleanSeed, deserializer),
                 },
-                FieldType::SelectionSet(expected) => NullableSeed {
-                    bound_field_id: self.bound_field_id,
-                    path: &self.path,
+                FieldType::SelectionSet(collected) => NullableSeed {
+                    bound_field_id: self.field.bound_field_id,
                     ctx: self.ctx,
                     seed: SelectionSetSeed {
                         ctx: self.ctx,
-                        path: &self.path,
-                        collected: expected,
+                        collected,
                     },
                 }
                 .deserialize(deserializer),
-            }
+            };
+            self.ctx.pop_edge();
+            result
         };
         result.map_err(move |err| {
             if !self.ctx.propagating_error.fetch_or(true, Ordering::Relaxed) {
+                let mut path = self.ctx.response_path();
+                path.push(self.field.edge);
                 self.ctx.response_part.borrow_mut().push_error(GraphqlError {
                     message: err.to_string(),
                     locations: self
                         .ctx
                         .plan
-                        .bound_walk_with(self.bound_field_id, ())
+                        .bound_walk_with(self.field.bound_field_id, ())
                         .name_location()
                         .into_iter()
                         .collect(),
-                    path: Some(self.path.clone()),
+                    path: Some(path),
                     ..Default::default()
                 });
             }

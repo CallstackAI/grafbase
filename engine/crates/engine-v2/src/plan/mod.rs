@@ -31,6 +31,8 @@ pub(crate) struct OperationPlan {
     field_attribution: Vec<PlanId>,
     // BoundSelectionSetId -> PlanId
     selection_set_attribution: Vec<PlanId>,
+    /// BoundSelectionSetId -> Option<CollectedSelectionSetId>
+    bound_to_collected_selection_set: Vec<Option<AnyCollectedSelectionSetId>>,
 
     // -- Plans --
     // Actual plans for the operation. A plan defines what do for a given selection set at a
