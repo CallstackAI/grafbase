@@ -25,7 +25,7 @@ pub use selection_set::*;
 #[derive(Clone, Copy)]
 pub(crate) struct PlanWalker<'a, Item = (), SchemaItem = ()> {
     pub(super) schema_walker: SchemaWalker<'a, SchemaItem>,
-    pub(super) operation: &'a OperationPlan,
+    pub(super) operation_plan: &'a OperationPlan,
     pub(super) variables: Option<&'a Variables>,
     pub(super) plan_id: PlanId,
     pub(super) item: Item,
@@ -42,7 +42,7 @@ where
     Operation: std::ops::Index<I>,
 {
     pub fn as_ref(&self) -> &'a <Operation as std::ops::Index<I>>::Output {
-        &self.operation.bound_operation[self.item]
+        &self.operation_plan.operation[self.item]
     }
 
     #[allow(dead_code)]
@@ -57,11 +57,11 @@ impl<'a> PlanWalker<'a> {
     }
 
     pub fn response_keys(&self) -> &'a ResponseKeys {
-        &self.operation.response_keys
+        &self.operation_plan.response_keys
     }
 
     pub fn operation(&self) -> OperationWalker<'a> {
-        self.operation.bound_operation.walker_with(self.schema_walker.walk(()))
+        self.operation_plan.operation.walker_with(self.schema_walker.walk(()))
     }
 
     pub fn selection_set(self) -> PlanSelectionSet<'a> {
@@ -73,11 +73,11 @@ impl<'a> PlanWalker<'a> {
     }
 
     pub fn output(&self) -> &'a PlanOutput {
-        &self.operation.plan_outputs[usize::from(self.plan_id)]
+        &self.operation_plan.plan_outputs[usize::from(self.plan_id)]
     }
 
     pub fn input(&self) -> Option<&'a PlanInput> {
-        self.operation.plan_inputs[usize::from(self.plan_id)].as_ref()
+        self.operation_plan.plan_inputs[usize::from(self.plan_id)].as_ref()
     }
 
     pub fn collected_selection_set(&self) -> PlanWalker<'a, ConcreteSelectionSetId, ()> {
@@ -111,7 +111,7 @@ where
 {
     type Output = <OperationPlan as std::ops::Index<Id>>::Output;
     fn index(&self, index: Id) -> &Self::Output {
-        &self.operation[index]
+        &self.operation_plan[index]
     }
 }
 
@@ -121,7 +121,7 @@ impl<'a, I, SI> PlanWalker<'a, I, SI> {
         SI: Copy,
     {
         PlanWalker {
-            operation: self.operation,
+            operation_plan: self.operation_plan,
             variables: self.variables,
             plan_id: self.plan_id,
             schema_walker: self.schema_walker,
@@ -131,7 +131,7 @@ impl<'a, I, SI> PlanWalker<'a, I, SI> {
 
     pub fn walk_with<I2, SI2>(&self, item: I2, schema_item: SI2) -> PlanWalker<'a, I2, SI2> {
         PlanWalker {
-            operation: self.operation,
+            operation_plan: self.operation_plan,
             variables: self.variables,
             plan_id: self.plan_id,
             schema_walker: self.schema_walker.walk(schema_item),
@@ -140,8 +140,8 @@ impl<'a, I, SI> PlanWalker<'a, I, SI> {
     }
 
     pub fn bound_walk_with<I2, SI2: Copy>(&self, item: I2, schema_item: SI2) -> OperationWalker<'a, I2, SI2> {
-        self.operation
-            .bound_operation
+        self.operation_plan
+            .operation
             .walker_with(self.schema_walker.walk(schema_item))
             .walk(item)
     }

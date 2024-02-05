@@ -117,7 +117,7 @@ impl<'schema> Planner<'schema> {
 
         let Self {
             schema,
-            operation: bound_operation,
+            operation,
             plans,
             plan_input_selection_sets,
             plan_root_selection_sets,
@@ -175,14 +175,15 @@ impl<'schema> Planner<'schema> {
             }
         }
 
-        let mut operation = OperationPlan {
-            bound_operation,
+        let mut operation_plan = OperationPlan {
             field_attribution,
             selection_set_attribution,
             plan_inputs,
             plan_outputs: Vec::with_capacity(plans.len()),
             collected_concrete_selection_sets: Vec::with_capacity(plans.len()),
             collected_concrete_fields: Vec::with_capacity(plans.len()),
+            bound_to_collected_selection_set: vec![None; operation.selection_sets.len()],
+            operation,
             plans,
             execution_plans: Vec::new(),
             execution_plans_parent_to_child_edges,
@@ -191,13 +192,13 @@ impl<'schema> Planner<'schema> {
             collected_conditional_selection_sets: Vec::new(),
             collected_conditional_fields: Vec::new(),
         };
-        operation.execution_plans_parent_to_child_edges.sort_unstable();
+        operation_plan.execution_plans_parent_to_child_edges.sort_unstable();
 
         for (i, PlanRootSelectionSet { ids, entity_type }) in plan_root_selection_sets.into_iter().enumerate() {
             let plan_id = PlanId::from(i);
-            let ty = operation[ids[0]].ty;
-            let collected_selection_set_id = Collector::new(schema, &mut operation, plan_id).collect(ids)?;
-            operation.plan_outputs.push(PlanOutput {
+            let ty = operation_plan[ids[0]].ty;
+            let collected_selection_set_id = Collector::new(schema, &mut operation_plan, plan_id).collect(ids)?;
+            operation_plan.plan_outputs.push(PlanOutput {
                 type_condition: FlatTypeCondition::flatten(self.schema, ty, vec![entity_type.into()]),
                 entity_type,
                 collected_selection_set_id,
@@ -206,18 +207,18 @@ impl<'schema> Planner<'schema> {
         }
 
         // For now there is a 1to1 mapping between logical plans and execution plans.
-        let mut execution_plans = Vec::with_capacity(operation.plans.len());
-        for (i, plan) in operation.plans.iter().enumerate() {
+        let mut execution_plans = Vec::with_capacity(operation_plan.plans.len());
+        for (i, plan) in operation_plan.plans.iter().enumerate() {
             let resolver = self.schema.walker().walk(plan.resolver_id).with_own_names();
             let plan_id = ExecutionPlanId::from(i);
             execution_plans.push(ExecutionPlan::build(
                 resolver,
-                operation.plan_walker(self.schema, plan_id, None),
+                operation_plan.plan_walker(self.schema, plan_id, None),
             )?);
         }
-        operation.execution_plans = execution_plans;
+        operation_plan.execution_plans = execution_plans;
 
-        Ok(operation)
+        Ok(operation_plan)
     }
 }
 
@@ -340,7 +341,7 @@ impl<'schema> Planner<'schema> {
                 resolver: self.schema.walk(resolver_id),
                 providable: Default::default(),
             };
-            self.recursive_plan_children(path, &logic, ids)?;
+            self.recursive_plan_children(path, &logic, self.walker().flatten_selection_sets(ids))?;
         }
         Ok(())
     }

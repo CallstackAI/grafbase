@@ -1,4 +1,4 @@
-use schema::{DataType, FieldId, Wrapping};
+use schema::{DataType, FieldId, ObjectId, Wrapping};
 
 use crate::{
     request::{BoundFieldId, FlatTypeCondition, SelectionSetType},
@@ -7,6 +7,12 @@ use crate::{
 };
 
 use super::{ConcreteFieldId, ConcreteSelectionSetId, ConditionalFieldId, ConditionalSelectionSetId, PlanBoundaryId};
+
+#[derive(Debug, Clone, Copy)]
+pub enum CollectedSelectionSetId {
+    Concrete(ConcreteSelectionSetId),
+    Conditional(ConditionalSelectionSetId),
+}
 
 #[derive(Debug)]
 pub enum CollectedSelectionSet {
@@ -47,6 +53,7 @@ pub enum FieldType<SelectionSet = CollectedSelectionSet> {
 #[derive(Debug)]
 pub struct ConcreteSelectionSet {
     pub ty: SelectionSetType,
+    // There is only one at most. But to avoid too much du
     pub maybe_boundary_id: Option<PlanBoundaryId>,
     // sorted by expected key
     pub fields: IdRange<ConcreteFieldId>,
@@ -65,7 +72,7 @@ pub struct ConcreteField {
 
 #[derive(Debug)]
 pub struct RuntimeConcreteSelectionSet {
-    pub ty: SelectionSetType,
+    pub object_id: ObjectId,
     pub boundary_ids: Vec<PlanBoundaryId>,
     // sorted by expected key
     pub fields: Vec<ConcreteField>,

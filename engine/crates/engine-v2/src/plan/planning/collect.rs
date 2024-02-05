@@ -4,9 +4,9 @@ use std::collections::HashSet;
 
 use crate::{
     plan::{
-        CollectedSelectionSet, ConcreteField, ConcreteFieldId, ConcreteSelectionSet, ConcreteSelectionSetId,
-        ConditionalField, ConditionalFieldId, ConditionalSelectionSet, ConditionalSelectionSetId, FieldType,
-        OperationPlan, PlanBoundaryId, PlanId,
+        CollectedSelectionSet, CollectedSelectionSetId, ConcreteField, ConcreteFieldId, ConcreteSelectionSet,
+        ConcreteSelectionSetId, ConditionalField, ConditionalFieldId, ConditionalSelectionSet,
+        ConditionalSelectionSetId, FieldType, OperationPlan, PlanBoundaryId, PlanId,
     },
     request::{
         BoundFieldId, BoundSelectionSetId, EntityType, FlatField, FlatTypeCondition, OperationWalker, SelectionSetType,
@@ -129,17 +129,25 @@ impl<'schema, 'a> Collector<'schema, 'a> {
         //   If a single condition is left, we can only work with None. A selection set like
         //   `animal { ... on Dog { name } }` would have a single condition, but we may still see
         //   cat objects. A ConcreteSelectionSet would require `name`.
-        if concrete_parent && !too_complex && conditions.len() == 1 && conditions.contains(&None) {
+        let id = if concrete_parent && !too_complex && conditions.len() == 1 && conditions.contains(&None) {
             self.collect_concrete_selection_set(
                 selection_set.ty,
                 plan_fields.into_iter().map(|field| field.bound_field_id).collect(),
                 maybe_boundary_id,
             )
-            .map(CollectedSelectionSet::Concrete)
+            .map(CollectedSelectionSetId::Concrete)?
         } else {
             self.create_conditional_selection_set(selection_set.ty, plan_fields, maybe_boundary_id)
-                .map(CollectedSelectionSet::Conditional)
+                .map(CollectedSelectionSetId::Conditional)?
+        };
+
+        for root_id in selection_set.root_selection_set_ids {
+            self.operation.bound_to_collected_selection_set[usize::from(root_id)] = Some(id);
         }
+        Ok(match id {
+            CollectedSelectionSetId::Concrete(id) => CollectedSelectionSet::Concrete(id),
+            CollectedSelectionSetId::Conditional(id) => CollectedSelectionSet::Conditional(id),
+        })
     }
 
     fn collect_concrete_selection_set(
@@ -161,7 +169,7 @@ impl<'schema, 'a> Collector<'schema, 'a> {
                     bound_field.response_key()
                 } else {
                     self.operation
-                        .bound_operation
+                        .operation
                         .response_keys
                         .get_or_intern(schema_field.name())
                 };
@@ -174,7 +182,7 @@ impl<'schema, 'a> Collector<'schema, 'a> {
                     edge: group.edge,
                     bound_field_id,
                     schema_field_id: field_id,
-                    wrapping: schema_field.ty().wrapping().clone(),
+                    wrapping: schema_field.ty().wrapping(),
                     ty,
                 });
             } else {
@@ -210,7 +218,7 @@ impl<'schema, 'a> Collector<'schema, 'a> {
                     bound_field.response_key()
                 } else {
                     self.operation
-                        .bound_operation
+                        .operation
                         .response_keys
                         .get_or_intern(schema_field.name())
                 };

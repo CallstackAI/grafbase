@@ -23,7 +23,7 @@ pub enum PlanCollectedSelectionSet<'a> {
 
 impl<'a> PlanConcreteSelectionSet<'a> {
     pub fn as_ref(&self) -> &'a ConcreteSelectionSet {
-        &self.operation[self.item]
+        &self.operation_plan[self.item]
     }
 
     pub fn id(&self) -> ConcreteSelectionSetId {
@@ -42,7 +42,7 @@ impl<'a> PlanConcreteSelectionSet<'a> {
 
 impl<'a> PlanConcreteField<'a> {
     pub fn as_ref(&self) -> &'a ConcreteField {
-        &self.operation[self.item]
+        &self.operation_plan[self.item]
     }
 
     pub fn as_bound_field(&self) -> PlanField<'a> {
@@ -73,7 +73,7 @@ impl<'a> PlanConcreteField<'a> {
 
 impl<'a> PlanConditionalSelectionSet<'a> {
     pub fn as_ref(&self) -> &'a ConditionalSelectionSet {
-        &self.operation[self.item]
+        &self.operation_plan[self.item]
     }
 
     pub fn fields(self) -> impl Iterator<Item = PlanConditionalField<'a>> + 'a {
@@ -83,7 +83,7 @@ impl<'a> PlanConditionalSelectionSet<'a> {
 
 impl<'a> PlanConditionalField<'a> {
     pub fn as_ref(&self) -> &'a ConditionalField {
-        &self.operation[self.item]
+        &self.operation_plan[self.item]
     }
 
     pub fn as_bound_field(&self) -> PlanField<'a> {
@@ -120,8 +120,10 @@ impl<'a> std::fmt::Debug for PlanConcreteSelectionSet<'a> {
                     .iter()
                     .map(|edge| match edge.unpack() {
                         UnpackedResponseEdge::Index(i) => format!("index: {i}"),
-                        UnpackedResponseEdge::BoundResponseKey(key) => self.operation.response_keys[key].to_string(),
-                        UnpackedResponseEdge::ExtraField(key) => self.operation.response_keys[key].to_string(),
+                        UnpackedResponseEdge::BoundResponseKey(key) => {
+                            self.operation_plan.response_keys[key].to_string()
+                        }
+                        UnpackedResponseEdge::ExtraField(key) => self.operation_plan.response_keys[key].to_string(),
                     })
                     .collect::<Vec<_>>(),
             )
@@ -136,7 +138,7 @@ impl<'a> std::fmt::Debug for PlanConcreteField<'a> {
         if self.as_bound_field().response_key() != self.as_ref().expected_key {
             fmt.field(
                 "expected_key",
-                &&self.operation.response_keys[self.as_ref().expected_key],
+                &&self.operation_plan.response_keys[self.as_ref().expected_key],
             );
         }
         if let Some(selection_set) = self.selection_set() {
@@ -156,7 +158,7 @@ impl<'a> std::fmt::Debug for PlanConditionalSelectionSet<'a> {
                     .as_ref()
                     .typename_fields
                     .iter()
-                    .map(|(_, edge)| &self.operation.response_keys[edge.as_response_key().unwrap()])
+                    .map(|(_, edge)| &self.operation_plan.response_keys[edge.as_response_key().unwrap()])
                     .collect::<Vec<_>>(),
             )
             .finish()
@@ -170,7 +172,7 @@ impl<'a> std::fmt::Debug for PlanConditionalField<'a> {
         if self.as_bound_field().response_key() != self.as_ref().expected_key {
             fmt.field(
                 "expected_key",
-                &&self.operation.response_keys[self.as_ref().expected_key],
+                &&self.operation_plan.response_keys[self.as_ref().expected_key],
             );
         }
         if let Some(selection_set) = self.selection_set() {

@@ -201,7 +201,7 @@ impl QueryBuilder {
         buffer.write_str(" {\n")?;
         buffer.indent += 1;
         let n = buffer.len();
-        if !selection_set.ty().is_object() {
+        if selection_set.requires_typename() {
             // We always need to know the concrete object.
             buffer.indent_write("__typename\n")?;
         }
@@ -212,9 +212,7 @@ impl QueryBuilder {
                 PlanSelection::InlineFragment(fragment) => self.write_inline_fragment(buffer, fragment)?,
             };
         }
-        // If nothing was written it means only meta fields (__typename) are present and during
-        // deserialization we'll expect an object. So adding `__typename` to ensure a non empty
-        // selection set.
+        // HACK to avoid empty selection sets
         if buffer.len() == n {
             buffer.indent_write("__typename\n")?;
         }

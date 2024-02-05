@@ -336,7 +336,7 @@ impl<'a> IntrospectionSchemaBuilder<'a> {
                 ("defaultValue", nullable_string, __InputValue::DefaultValue),
             ],
         );
-        let args = self.insert_field_type(__input_value.id, Wrapping::required().required_list());
+        let args = self.insert_field_type(__input_value.id, Wrapping::required().wrapped_by_required_list());
 
         /*
         type __Field {
@@ -370,7 +370,8 @@ impl<'a> IntrospectionSchemaBuilder<'a> {
         }
         */
         let __directive = {
-            let locations = self.insert_field_type(__directive_location, Wrapping::required().required_list());
+            let locations =
+                self.insert_field_type(__directive_location, Wrapping::required().wrapped_by_required_list());
             self.insert_object(
                 "__Directive",
                 vec![
@@ -399,7 +400,8 @@ impl<'a> IntrospectionSchemaBuilder<'a> {
         */
         let mut __type = {
             let kind = self.insert_field_type(__type_kind, Wrapping::required());
-            let input_fields = self.insert_field_type(__input_value.id, Wrapping::required().nullable_list());
+            let input_fields =
+                self.insert_field_type(__input_value.id, Wrapping::required().wrapped_by_nullable_list());
             let mut __type = self.insert_object(
                 "__Type",
                 vec![
@@ -412,7 +414,8 @@ impl<'a> IntrospectionSchemaBuilder<'a> {
                 ],
             );
             {
-                let nullable__field_list = self.insert_field_type(__field.id, Wrapping::required().nullable_list());
+                let nullable__field_list =
+                    self.insert_field_type(__field.id, Wrapping::required().wrapped_by_nullable_list());
                 let field_id = self.insert_object_field(__type.id, "fields", nullable__field_list);
                 __type.fields.push((field_id, __Type::Fields));
                 let input_value_id =
@@ -421,7 +424,7 @@ impl<'a> IntrospectionSchemaBuilder<'a> {
             }
             {
                 let nullable__enum_value_list =
-                    self.insert_field_type(__enum_value.id, Wrapping::required().nullable_list());
+                    self.insert_field_type(__enum_value.id, Wrapping::required().wrapped_by_nullable_list());
                 let field_id = self.insert_object_field(__type.id, "enumValues", nullable__enum_value_list);
                 __type.fields.push((field_id, __Type::EnumValues));
                 let input_value_id =
@@ -433,8 +436,8 @@ impl<'a> IntrospectionSchemaBuilder<'a> {
 
         let required__type = self.insert_field_type(__type.id, Wrapping::required());
         let nullable__type = self.insert_field_type(__type.id, Wrapping::nullable());
-        let required__type_list = self.insert_field_type(__type.id, Wrapping::required().required_list());
-        let nullable__type_list = self.insert_field_type(__type.id, Wrapping::required().nullable_list());
+        let required__type_list = self.insert_field_type(__type.id, Wrapping::required().wrapped_by_required_list());
+        let nullable__type_list = self.insert_field_type(__type.id, Wrapping::required().wrapped_by_nullable_list());
 
         __input_value.fields.push((
             self.insert_object_field(__input_value.id, "type", required__type),
@@ -467,7 +470,8 @@ impl<'a> IntrospectionSchemaBuilder<'a> {
           directives: [__Directive!]!
         }
         */
-        let required__directive_list = self.insert_field_type(__directive.id, Wrapping::required().required_list());
+        let required__directive_list =
+            self.insert_field_type(__directive.id, Wrapping::required().wrapped_by_required_list());
         let __schema = self.insert_object(
             "__Schema",
             vec![

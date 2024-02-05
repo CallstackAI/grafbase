@@ -18,11 +18,13 @@ pub(crate) use walkers::*;
 
 pub(crate) struct OperationPlan {
     // -- Operation --
-    bound_operation: Operation,
+    operation: Operation,
     /// BoundFieldId -> PlanId
     field_attribution: Vec<PlanId>,
     /// BoundSelectionSetId -> PlanId
     selection_set_attribution: Vec<PlanId>,
+    /// BoundSelectionSetId -> Option<CollectedSelectionSetId>
+    bound_to_collected_selection_set: Vec<Option<CollectedSelectionSetId>>,
 
     // -- Plans --
     /// PlanId -> LogicalPlan
@@ -53,7 +55,7 @@ impl std::ops::Deref for OperationPlan {
     type Target = Operation;
 
     fn deref(&self) -> &Self::Target {
-        &self.bound_operation
+        &self.operation
     }
 }
 
@@ -63,7 +65,7 @@ where
 {
     type Output = <Operation as std::ops::Index<I>>::Output;
     fn index(&self, index: I) -> &Self::Output {
-        &self.bound_operation[index]
+        &self.operation[index]
     }
 }
 
@@ -86,7 +88,7 @@ impl OperationPlan {
         let schema_walker = schema.walk(self[plan_id].resolver_id).with_own_names().walk(());
         PlanWalker {
             schema_walker,
-            operation: self,
+            operation_plan: self,
             variables,
             plan_id,
             item: (),
