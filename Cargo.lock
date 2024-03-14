@@ -1950,13 +1950,13 @@ dependencies = [
  "engine",
  "engine-parser",
  "engine-v2-config",
+ "engine-v2-id-newtypes",
  "engine-v2-schema",
  "engine-value",
  "futures",
  "futures-util",
  "grafbase-tracing",
  "hex",
- "id-newtypes",
  "im",
  "itertools 0.12.1",
  "lasso",
@@ -1990,13 +1990,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "engine-v2-id-newtypes"
+version = "0.0.0"
+
+[[package]]
 name = "engine-v2-schema"
 version = "3.0.31"
 dependencies = [
  "engine-v2-config",
+ "engine-v2-id-newtypes",
  "fnv",
  "graphql-federated-graph",
- "id-newtypes",
  "indexmap 2.2.5",
  "insta",
  "serde",
@@ -3495,10 +3499,6 @@ checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
 dependencies = [
  "cc",
 ]
-
-[[package]]
-name = "id-newtypes"
-version = "0.0.0"
 
 [[package]]
 name = "ident_case"
