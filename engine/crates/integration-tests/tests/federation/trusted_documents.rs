@@ -1,9 +1,9 @@
+use engine_v2::Engine;
 use futures::Future;
-use gateway_v2::Gateway;
 use graphql_mocks::{FakeGithubSchema, MockGraphQlServer};
 use integration_tests::{
     engine::GraphQlRequest,
-    federation::{GatewayV2Ext, TestFederationGateway, TestTrustedDocument},
+    federation::{EngineV2Ext, TestFederationGateway, TestTrustedDocument},
     runtime,
 };
 use serde_json::json;
@@ -37,7 +37,7 @@ where
     runtime().block_on(async move {
         let github_mock = MockGraphQlServer::new(FakeGithubSchema).await;
 
-        let engine = Gateway::builder()
+        let engine = Engine::builder()
             .with_schema("schema", &github_mock)
             .await
             .with_trusted_documents("my-branch-id".to_owned(), TRUSTED_DOCUMENTS.to_owned())
@@ -54,11 +54,8 @@ fn relay_style_happy_path() {
         let send = || {
             engine
                 .execute(GraphQlRequest {
-                    query: String::new(),
-                    operation_name: None,
-                    variables: None,
-                    extensions: None,
                     doc_id: Some(TRUSTED_DOCUMENTS[1].document_id.to_owned()),
+                    ..Default::default()
                 })
                 .header("x-grafbase-client-name", "ios-app")
         };
@@ -170,11 +167,8 @@ fn wrong_branch() {
     test(|engine| async move {
         let response = engine
             .execute(GraphQlRequest {
-                query: String::new(),
-                operation_name: None,
-                variables: None,
-                extensions: None,
                 doc_id: Some(TRUSTED_DOCUMENTS.last().unwrap().document_id.to_owned()),
+                ..Default::default()
             })
             .header("x-grafbase-client-name", "ios-app")
             .await;

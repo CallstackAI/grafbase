@@ -10,13 +10,10 @@ use itertools::Either;
 use schema::{ObjectId, Schema};
 
 use super::{
-    ExecutionMetadata, GraphqlError, InitialResponse, ResponseBoundaryItem, ResponseData, ResponseEdge, ResponseObject,
-    ResponsePath, ResponseValue, UnpackedResponseEdge,
+    ExecutionMetadata, GraphqlError, InitialResponse, Response, ResponseBoundaryItem, ResponseData, ResponseEdge,
+    ResponseObject, ResponsePath, ResponseValue, UnpackedResponseEdge,
 };
-use crate::{
-    plan::{OperationPlan, PlanBoundaryId},
-    Response,
-};
+use crate::plan::{OperationPlan, PlanBoundaryId};
 
 #[derive(Default)]
 pub(crate) struct ResponseDataPart {
@@ -105,8 +102,11 @@ impl ResponseBuilder {
                 root: self.root.map(|(id, _)| id),
                 parts: self.parts,
             },
+            metadata: ExecutionMetadata {
+                has_errors: Some(!self.errors.is_empty()),
+                ..metadata
+            },
             errors: self.errors,
-            metadata,
         })
     }
 

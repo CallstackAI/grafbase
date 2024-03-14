@@ -38,7 +38,7 @@ pub(super) struct GraphUpdater {
     uplink_url: Url,
     uplink_client: reqwest::Client,
     access_token: AsciiString,
-    sender: GatewaySender,
+    sender: EngineSender,
     current_id: Option<Ulid>,
     gateway_config: GatewayConfig,
 }
@@ -59,7 +59,7 @@ impl GraphUpdater {
         graph_ref: &str,
         branch: Option<&str>,
         access_token: AsciiString,
-        sender: GatewaySender,
+        sender: EngineSender,
         gateway_config: GatewayConfig,
     ) -> crate::Result<Self> {
         let uplink_client = reqwest::ClientBuilder::new()

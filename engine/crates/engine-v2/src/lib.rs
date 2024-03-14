@@ -5,10 +5,15 @@ mod request;
 mod response;
 mod sources;
 
-pub use ::engine::Request;
+// there is no other implementation besides axum as of today
+#[cfg(feature = "axum")]
+mod websocket;
+
 pub use engine::{Engine, EngineEnv};
-pub use execution::PreparedExecution;
-pub use response::{cacheable::CacheableResponse, ExecutionMetadata, Response};
-pub use schema::{CacheConfig, Schema};
+pub use engine_v2_common::{ExecutionMetadata, HttpGraphqlRequest, HttpGraphqlResponse, ResponseBody};
+pub use schema::Schema;
+
+#[cfg(feature = "axum")]
+pub use websocket::axum::*;
 
 pub use ::config::{latest as config, VersionedConfig};

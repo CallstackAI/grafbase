@@ -1,5 +1,5 @@
 use super::{
-    gateway::{self, GatewayWatcher},
+    gateway::{self, EngineWatcher},
     graph_updater::GraphUpdater,
 };
 use crate::server::gateway::GatewayConfig;
@@ -31,7 +31,7 @@ impl GraphFetchMethod {
     /// in two ways: if providing a graph SDL, we a new gateway immediately. Alternatively,
     /// if a graph ref and access token is provided, the function returns immediately, and
     /// the gateway will be available eventually when the GDN responds with a working graph.
-    pub(crate) fn into_gateway(self, config: GatewayConfig) -> crate::Result<GatewayWatcher> {
+    pub(crate) fn into_gateway(self, config: GatewayConfig) -> crate::Result<EngineWatcher> {
         let (sender, gateway) = watch::channel(None);
 
         match self {
