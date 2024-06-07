@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 pub(crate) use error::GraphqlError;
-use grafbase_tracing::metrics::HasGraphqlErrors;
-use headers::HeaderMapExt;
+use grafbase_tracing::gql_response_status::GraphqlResponseStatus;
 pub use key::*;
 pub use path::*;
 pub use read::*;
@@ -58,10 +57,21 @@ impl Response {
         })
     }
 
-    pub(crate) fn has_errors(&self) -> bool {
+    pub(crate) fn status(&self) -> GraphqlResponseStatus {
         match self {
-            Self::Initial(resp) => !resp.errors.is_empty(),
-            Self::BadRequest(resp) => !resp.errors.is_empty(),
+            Self::Initial(resp) => {
+                if resp.errors.is_empty() {
+                    GraphqlResponseStatus::Success
+                } else {
+                    GraphqlResponseStatus::FieldError {
+                        count: resp.errors.len() as u64,
+                        data_is_null: resp.data.root.is_none(),
+                    }
+                }
+            }
+            Self::BadRequest(resp) => GraphqlResponseStatus::RequestError {
+                count: resp.errors.len() as u64,
+            },
         }
     }
 }
@@ -74,10 +84,6 @@ impl std::fmt::Debug for Response {
 
 impl From<Response> for HttpGraphqlResponse {
     fn from(response: Response) -> Self {
-        let mut resp = HttpGraphqlResponse::from_json(&response);
-        if response.has_errors() {
-            resp.headers.typed_insert(HasGraphqlErrors);
-        }
-        resp
+        HttpGraphqlResponse::from_json(response.status(), &response)
     }
 }

@@ -114,10 +114,11 @@ impl ResponseBuilder {
         let Some((root, _)) = self.root else {
             return;
         };
+
         let mut last_nullable: Option<ResponseValueId> = None;
         let mut previous: Either<ResponseObjectId, ResponseListId> = Either::Left(root);
         for &edge in path.iter() {
-            let (unique_id, value) = match (previous, edge.unpack()) {
+            let (id, value) = match (previous, edge.unpack()) {
                 (
                     Either::Left(object_id),
                     UnpackedResponseEdge::BoundResponseKey(_) | UnpackedResponseEdge::ExtraFieldResponseKey(_),
@@ -126,20 +127,20 @@ impl ResponseBuilder {
                         // Shouldn't happen but equivalent to null
                         return;
                     };
-                    let unique_id = ResponseValueId::ObjectField {
+                    let id = ResponseValueId::ObjectField {
                         object_id,
                         field_position,
                     };
                     let value = &self[object_id][field_position];
-                    (unique_id, value)
+                    (id, value)
                 }
                 (Either::Right(list_id), UnpackedResponseEdge::Index(index)) => {
-                    let unique_id = ResponseValueId::ListItem { list_id, index };
+                    let id = ResponseValueId::ListItem { list_id, index };
                     let Some(value) = self[list_id].get(index) else {
                         // Shouldn't happen but equivalent to null
                         return;
                     };
-                    (unique_id, value)
+                    (id, value)
                 }
                 _ => return,
             };
@@ -153,7 +154,7 @@ impl ResponseBuilder {
                     index,
                 } => {
                     if nullable {
-                        last_nullable = Some(unique_id);
+                        last_nullable = Some(id);
                     }
                     previous = Either::Left(ResponseObjectId { part_id, index });
                 }
@@ -164,7 +165,7 @@ impl ResponseBuilder {
                     length,
                 } => {
                     if nullable {
-                        last_nullable = Some(unique_id);
+                        last_nullable = Some(id);
                     }
                     previous = Either::Right(ResponseListId {
                         part_id,
@@ -245,6 +246,10 @@ impl ResponsePart {
 
     pub fn has_errors(&self) -> bool {
         !self.errors.is_empty()
+    }
+
+    pub fn errors_count(&self) -> usize {
+        self.errors.len()
     }
 
     /// This does not change how errors were propagated.

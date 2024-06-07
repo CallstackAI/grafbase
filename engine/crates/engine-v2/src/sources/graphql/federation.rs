@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use grafbase_tracing::span::{subgraph::SubgraphRequestSpan, GqlRecorderSpanExt, GqlResponseAttributes};
+use grafbase_tracing::span::{subgraph::SubgraphRequestSpan, GqlRecorderSpanExt};
 use runtime::fetch::FetchRequest;
 use schema::{
     sources::graphql::{FederationEntityResolverWalker, GraphqlEndpointId, GraphqlEndpointWalker},
@@ -108,7 +108,7 @@ impl<'ctx> FederationEntityExecutor<'ctx> {
             .with_document(&self.operation.query)
             .into_span();
 
-        async {
+        let status = async {
             let bytes = self
                 .ctx
                 .engine
@@ -138,7 +138,7 @@ impl<'ctx> FederationEntityExecutor<'ctx> {
                 .plan
                 .root_error_path(&self.response_boundary_items[0].response_path);
             let seed_ctx = self.plan.new_seed(&mut self.response_part);
-            ingest_deserializer_into_response(
+            ExecutionResult::Ok(ingest_deserializer_into_response(
                 &seed_ctx,
                 &root_err_path,
                 EntitiesDataSeed {
@@ -146,15 +146,14 @@ impl<'ctx> FederationEntityExecutor<'ctx> {
                     response_boundary: &self.response_boundary_items,
                 },
                 &mut serde_json::Deserializer::from_slice(&bytes),
-            );
-            ExecutionResult::Ok(())
+            ))
         }
         .instrument(subgraph_request_span.clone())
         .await?;
 
-        subgraph_request_span.record_gql_response(GqlResponseAttributes {
-            has_errors: self.response_part.has_errors(),
-        });
+        if let Some(status) = status {
+            subgraph_request_span.record_gql_status(status)
+        }
 
         Ok(self.response_part)
     }

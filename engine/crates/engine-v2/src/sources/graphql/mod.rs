@@ -1,4 +1,4 @@
-use grafbase_tracing::span::{subgraph::SubgraphRequestSpan, GqlRecorderSpanExt, GqlResponseAttributes};
+use grafbase_tracing::span::{subgraph::SubgraphRequestSpan, GqlRecorderSpanExt};
 use runtime::fetch::FetchRequest;
 use schema::{
     sources::graphql::{GraphqlEndpointId, GraphqlEndpointWalker, RootFieldResolverWalker},
@@ -103,7 +103,7 @@ impl<'ctx> GraphqlExecutor<'ctx> {
             .with_document(&self.operation.query)
             .into_span();
 
-        async {
+        let status = async {
             let bytes = self
                 .ctx
                 .engine
@@ -130,22 +130,20 @@ impl<'ctx> GraphqlExecutor<'ctx> {
                 .bytes;
             tracing::debug!("{}", String::from_utf8_lossy(&bytes));
 
-            let err_path = self.plan.root_error_path(&self.response_boundary_item.response_path);
             let seed_ctx = self.plan.new_seed(&mut self.response_part);
-            deserialize::ingest_deserializer_into_response(
+            ExecutionResult::Ok(deserialize::ingest_deserializer_into_response(
                 &seed_ctx,
-                &err_path,
+                &self.response_boundary_item.response_path,
                 seed_ctx.create_root_seed(&self.response_boundary_item),
                 &mut serde_json::Deserializer::from_slice(&bytes),
-            );
-            ExecutionResult::Ok(())
+            ))
         }
         .instrument(subgraph_request_span.clone())
         .await?;
 
-        subgraph_request_span.record_gql_response(GqlResponseAttributes {
-            has_errors: self.response_part.has_errors(),
-        });
+        if let Some(status) = status {
+            subgraph_request_span.record_gql_status(status)
+        }
 
         Ok(self.response_part)
     }

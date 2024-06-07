@@ -4,6 +4,27 @@ use serde_json::json;
 const SCHEMA: &str = include_str!("../../../data/federated-graph-schema.graphql");
 
 #[test]
+fn root_error() {
+    let engine = FederationGatewayWithoutIO::new(
+        SCHEMA,
+        r#"
+        query ExampleQuery {
+            me {
+                id
+            }
+        }
+        "#,
+        &[json!({})],
+    );
+    let response = integration_tests::runtime().block_on(engine.execute());
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {}
+    }
+    "###);
+}
+
+#[test]
 fn simple_error() {
     let engine = FederationGatewayWithoutIO::new(
         SCHEMA,

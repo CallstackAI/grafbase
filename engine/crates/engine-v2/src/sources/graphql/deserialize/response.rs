@@ -1,5 +1,6 @@
 use std::fmt;
 
+use grafbase_tracing::gql_response_status::GraphqlResponseStatus;
 use serde::{
     de::{DeserializeSeed, IgnoredAny, MapAccess, Visitor},
     Deserializer,
@@ -13,7 +14,8 @@ pub fn ingest_deserializer_into_response<'ctx, 'de, DataSeed, D>(
     root_err_path: &'ctx ResponsePath,
     seed: DataSeed,
     deserializer: D,
-) where
+) -> Option<GraphqlResponseStatus>
+where
     D: Deserializer<'de>,
     DataSeed: DeserializeSeed<'de, Value = ()>,
 {
@@ -23,12 +25,16 @@ pub fn ingest_deserializer_into_response<'ctx, 'de, DataSeed, D>(
         seed: Some(seed),
     }
     .deserialize(deserializer);
-    if let Err(err) = result {
-        report_error_if_no_others(
-            ctx,
-            root_err_path,
-            format!("Error decoding response from upstream: {err}"),
-        );
+    match result {
+        Ok(status) => Some(status),
+        Err(err) => {
+            report_error_if_no_others(
+                ctx,
+                root_err_path,
+                format!("Error decoding response from upstream: {err}"),
+            );
+            None
+        }
     }
 }
 
@@ -42,7 +48,7 @@ impl<'ctx, 'parent, 'de, DataSeed> DeserializeSeed<'de> for GraphqlResponseSeed<
 where
     DataSeed: DeserializeSeed<'de, Value = ()>,
 {
-    type Value = ();
+    type Value = GraphqlResponseStatus;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -56,7 +62,7 @@ impl<'ctx, 'parent, 'de, DataSeed> Visitor<'de> for GraphqlResponseSeed<'ctx, 'p
 where
     DataSeed: DeserializeSeed<'de, Value = ()>,
 {
-    type Value = ();
+    type Value = GraphqlResponseStatus;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("a valid GraphQL response")
@@ -66,12 +72,14 @@ where
     where
         A: MapAccess<'de>,
     {
+        let mut data_is_present: bool = false;
         let mut data_is_null: bool = true;
         let mut errors = vec![];
         while let Some(key) = map.next_key::<ResponseKey>()? {
             match key {
                 ResponseKey::Data => match self.seed.take() {
                     Some(seed) => {
+                        data_is_present = true;
                         data_is_null = map
                             .next_value_seed(InfaillibleNullableSeed {
                                 ctx: self.ctx,
@@ -91,15 +99,36 @@ where
                 }
             };
         }
-        if !errors.is_empty() {
-            // Replacing the any serde errors if the data is null, they're not relevant.
-            if data_is_null {
-                self.ctx.borrow_mut_response_part().replace_errors(errors);
-            } else {
-                self.ctx.borrow_mut_response_part().push_errors(errors);
-            }
+        if !data_is_present && errors.is_empty() {
+            return Err(serde::de::Error::custom("No data or errors in the response"));
         }
-        Ok(())
+        let errors_count = {
+            let mut part = self.ctx.borrow_mut_response_part();
+            if !errors.is_empty() {
+                // Replacing the any serde errors if the data is null, they're not relevant.
+                if data_is_null {
+                    part.replace_errors(errors);
+                } else {
+                    part.push_errors(errors);
+                }
+            }
+            part.errors_count()
+        };
+
+        Ok(if errors_count > 0 {
+            if data_is_present {
+                GraphqlResponseStatus::FieldError {
+                    count: errors_count as u64,
+                    data_is_null,
+                }
+            } else {
+                GraphqlResponseStatus::RequestError {
+                    count: errors_count as u64,
+                }
+            }
+        } else {
+            GraphqlResponseStatus::Success
+        })
     }
 }
 

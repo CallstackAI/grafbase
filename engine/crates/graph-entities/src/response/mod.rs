@@ -152,6 +152,7 @@ pub enum QueryResponseErrors {
 
 impl QueryResponse {
     /// Initialize a new response
+    #[cfg(test)]
     pub fn new_root<T>(node: T) -> Self
     where
         T: IntoResponseNode,
