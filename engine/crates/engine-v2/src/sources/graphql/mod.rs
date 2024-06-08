@@ -1,4 +1,4 @@
-use grafbase_tracing::span::{subgraph::SubgraphRequestSpan, GqlRecorderSpanExt};
+use grafbase_tracing::span::subgraph::SubgraphRequestSpan;
 use runtime::fetch::FetchRequest;
 use schema::{
     sources::graphql::{GraphqlEndpointId, GraphqlEndpointWalker, RootFieldResolverWalker},
@@ -13,7 +13,7 @@ use super::{ExecutionContext, ExecutionResult, Executor, ExecutorInput, Plan};
 use crate::{
     operation::OperationType,
     plan::{PlanWalker, PlanningResult},
-    response::{ResponseBoundaryItem, ResponsePart},
+    response::{ResponseObjectRef, ResponsePart},
 };
 
 mod deserialize;
@@ -89,21 +89,21 @@ pub(crate) struct GraphqlExecutor<'ctx> {
     subgraph: GraphqlEndpointWalker<'ctx>,
     operation: &'ctx PreparedGraphqlOperation,
     json_body: String,
-    response_boundary_item: ResponseBoundaryItem,
+    response_boundary_item: ResponseObjectRef,
     plan: PlanWalker<'ctx>,
     response_part: ResponsePart,
 }
 
 impl<'ctx> GraphqlExecutor<'ctx> {
     #[tracing::instrument(skip_all, fields(plan_id = %self.plan.id(), federated_subgraph = %self.subgraph.name()))]
-    pub async fn execute(mut self) -> ExecutionResult<ResponsePart> {
+    pub async fn execute(self) -> ExecutionResult<ResponsePart> {
         let subgraph_request_span = SubgraphRequestSpan::new(self.subgraph.name())
             .with_operation_type(self.operation.ty.as_ref())
             // The query string contains no input values, only variables. So it's safe to log.
             .with_document(&self.operation.query)
             .into_span();
 
-        let status = async {
+        async {
             let bytes = self
                 .ctx
                 .engine
@@ -130,19 +130,17 @@ impl<'ctx> GraphqlExecutor<'ctx> {
                 .bytes;
             tracing::debug!("{}", String::from_utf8_lossy(&bytes));
 
-            let seed_ctx = self.plan.new_seed(&mut self.response_part);
-            ExecutionResult::Ok(deserialize::ingest_deserializer_into_response(
-                &seed_ctx,
-                seed_ctx.create_root_seed(&self.response_boundary_item),
+            deserialize::ingest_deserializer_into_response(
+                &self.response_part,
+                Some(subgraph_request_span.clone()),
+                self.response_part
+                    .next_seed(self.plan)
+                    .ok_or_else(|| "No object to update")?,
                 &mut serde_json::Deserializer::from_slice(&bytes),
-            ))
+            )
         }
         .instrument(subgraph_request_span.clone())
         .await?;
-
-        if let Some(status) = status {
-            subgraph_request_span.record_gql_status(status)
-        }
 
         Ok(self.response_part)
     }

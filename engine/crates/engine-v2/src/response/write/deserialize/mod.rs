@@ -10,10 +10,10 @@ use serde::{
     Deserializer,
 };
 
-use super::{ResponseObjectUpdate, ResponsePart};
+use super::{ResponseObjectUpdate, ResponsePart, ResponseWriter};
 use crate::{
     plan::{CollectedField, CollectedSelectionSetId, PlanWalker},
-    response::{GraphqlError, ResponseBoundaryItem, ResponseEdge, ResponsePath, ResponseValue},
+    response::{GraphqlError, ResponseEdge, ResponseObjectRef, ResponsePath, ResponseValue},
 };
 
 mod field;
@@ -29,41 +29,26 @@ use nullable::NullableSeed;
 use scalar::*;
 use selection_set::*;
 
-#[derive(Clone)]
-pub(crate) struct SeedContext<'ctx>(Rc<SeedContextInner<'ctx>>);
-
-struct SeedContextInner<'ctx> {
+pub struct SeedContext<'ctx> {
     plan: PlanWalker<'ctx>,
-    // We could probably avoid the RefCell, but didn't took the time to properly deal with it.
-    response_part: RefCell<&'ctx mut ResponsePart>,
+    writer: ResponseWriter,
     propagating_error: AtomicBool, // using an atomic bool for convenience of fetch_or & fetch_and
     path: RefCell<Vec<ResponseEdge>>,
 }
 
 impl<'ctx> SeedContext<'ctx> {
-    pub fn new(plan: PlanWalker<'ctx>, response_part: &'ctx mut ResponsePart) -> Self {
-        Self(Rc::new(SeedContextInner {
+    pub fn new(plan: PlanWalker<'ctx>, writer: ResponseWriter) -> Self {
+        let path = RefCell::new(writer.root_path().iter().copied().collect());
+        Self {
             plan,
-            response_part: RefCell::new(response_part),
+            writer,
             propagating_error: AtomicBool::new(false),
-            path: RefCell::new(Vec::new()),
-        }))
-    }
-
-    pub fn create_root_seed(&self, boundary_item: &'ctx ResponseBoundaryItem) -> UpdateSeed<'ctx> {
-        UpdateSeed {
-            ctx: self.clone(),
-            boundary_item,
-            id: self.0.plan.collected_selection_set().id(),
+            path,
         }
-    }
-
-    pub fn borrow_mut_response_part(&self) -> RefMut<'_, &'ctx mut ResponsePart> {
-        self.0.response_part.borrow_mut()
     }
 }
 
-impl<'ctx> SeedContextInner<'ctx> {
+impl<'ctx> SeedContext<'ctx> {
     fn missing_field_error_message(&self, collected_field: &CollectedField) -> String {
         let field = &self.plan[collected_field.id];
         let response_keys = self.plan.response_keys();
@@ -102,8 +87,14 @@ impl<'ctx> SeedContextInner<'ctx> {
 
 pub(crate) struct UpdateSeed<'ctx> {
     ctx: SeedContext<'ctx>,
-    boundary_item: &'ctx ResponseBoundaryItem,
-    id: CollectedSelectionSetId,
+}
+
+impl<'ctx> UpdateSeed<'ctx> {
+    pub(super) fn new(plan: PlanWalker<'ctx>, writer: ResponseWriter) -> Self {
+        Self {
+            ctx: SeedContext::new(plan, writer),
+        }
+    }
 }
 
 impl<'de, 'ctx> DeserializeSeed<'de> for UpdateSeed<'ctx> {
@@ -113,50 +104,43 @@ impl<'de, 'ctx> DeserializeSeed<'de> for UpdateSeed<'ctx> {
     where
         D: serde::Deserializer<'de>,
     {
-        let ctx = &self.ctx.0;
-        ctx.set_response_path(&self.boundary_item.response_path);
-
+        let UpdateSeed { ctx } = self;
+        let selection_set_id = ctx.plan.collected_selection_set().id();
         let result = deserializer.deserialize_option(NullableVisitor(
-            CollectedSelectionSetSeed::new_from_id(ctx, self.id).fields_seed,
+            CollectedSelectionSetSeed::new_from_id(&ctx, selection_set_id).fields_seed,
         ));
 
-        let mut response_part = ctx.response_part.borrow_mut();
         match result {
             Ok(Some((_, fields))) => {
-                response_part.push_update(ResponseObjectUpdate {
-                    id: self.boundary_item.response_object_id,
-                    fields,
-                });
+                ctx.writer.update_root_object_with(fields);
             }
             Ok(None) => {
-                let mut update = ResponseObjectUpdate {
-                    id: self.boundary_item.response_object_id,
-                    fields: Vec::with_capacity(ctx.plan[self.id].field_ids.len()),
-                };
-                for field in &ctx.plan[ctx.plan[self.id].field_ids] {
+                let field_ids = ctx.plan[selection_set_id].field_ids;
+                let mut fields = Vec::with_capacity(field_ids.len());
+                for field in &ctx.plan[field_ids] {
                     if field.wrapping.is_required() {
-                        response_part.push_error(GraphqlError {
+                        ctx.writer.propagate_error(GraphqlError {
                             message: ctx.missing_field_error_message(field),
                             path: Some(ctx.response_path().child(field.edge)),
                             ..Default::default()
                         });
-                        response_part.push_error_path_to_propagate(self.boundary_item.response_path.clone());
                         return Ok(());
                     } else {
-                        update.fields.push((field.edge, ResponseValue::Null));
+                        fields.push((field.edge, ResponseValue::Null));
                     }
                 }
-                response_part.push_update(update);
+                ctx.writer.update_root_object_with(fields);
             }
             Err(err) => {
                 if !ctx.propagating_error.fetch_or(true, Ordering::Relaxed) {
-                    response_part.push_error(GraphqlError {
+                    ctx.writer.propagate_error(GraphqlError {
                         message: err.to_string(),
                         path: Some(ctx.response_path()),
                         ..Default::default()
                     });
+                } else {
+                    ctx.writer.continue_error_propagation();
                 }
-                response_part.push_error_path_to_propagate(self.boundary_item.response_path.clone());
             }
         }
         Ok(())

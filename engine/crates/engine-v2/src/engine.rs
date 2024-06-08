@@ -197,12 +197,12 @@ impl<'ctx> ExecutionContext<'ctx> {
         mut request: Request,
     ) -> (Option<GraphqlOperationMetricsAttributes>, Response) {
         if let Err(err) = self.handle_persisted_query(&mut request).await {
-            return (None, Response::from_error(err));
+            return (None, Response::bad_request(err));
         }
         let operation = match Operation::build(self, &request) {
             Ok(operation) => operation,
             Err(err) => {
-                return (None, Response::from_error(err));
+                return (None, Response::bad_request(err));
             }
         };
 
@@ -227,13 +227,13 @@ impl<'ctx> ExecutionContext<'ctx> {
         });
 
         let response = if matches!(operation.ty, OperationType::Subscription) {
-            Response::from_error(GraphqlError::new(
+            Response::bad_request(GraphqlError::new(
                 "Subscriptions are only suported on streaming transports. Try making a request with SSE or WebSockets",
             ))
         } else {
             match self.prepare_coordinator(operation, request.variables) {
                 Ok(coordinator) => coordinator.execute().await,
-                Err(errors) => Response::from_errors(errors),
+                Err(errors) => Response::bad_request_from_errors(errors),
             }
         };
 
@@ -247,7 +247,7 @@ impl<'ctx> ExecutionContext<'ctx> {
         mut sender: mpsc::Sender<Response>,
     ) -> (Option<GraphqlOperationMetricsAttributes>, GraphqlResponseStatus) {
         if let Err(err) = self.handle_persisted_query(&mut request).await {
-            let response = Response::from_error(err);
+            let response = Response::bad_request(err);
             let status = response.status();
             sender.send(response).await.ok();
             return (None, status);
@@ -255,7 +255,7 @@ impl<'ctx> ExecutionContext<'ctx> {
         let operation = match Operation::build(self, &request) {
             Ok(operation) => operation,
             Err(err) => {
-                let response = Response::from_error(err);
+                let response = Response::bad_request(err);
                 let status = response.status();
                 sender.send(response).await.ok();
                 return (None, status);
@@ -285,7 +285,7 @@ impl<'ctx> ExecutionContext<'ctx> {
         let coordinator = match self.prepare_coordinator(operation, request.variables) {
             Ok(coordinator) => coordinator,
             Err(errors) => {
-                let response = Response::from_errors(errors);
+                let response = Response::bad_request_from_errors(errors);
                 let status = response.status();
                 sender.send(response).await.ok();
                 return (metrics_attributes, status);

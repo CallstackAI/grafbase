@@ -13,7 +13,7 @@ use crate::{
     execution::ExecutionContext,
     operation::{Operation, Variables},
     plan::{OperationExecutionState, OperationPlan, PlanId, PlanWalker},
-    response::{Response, ResponseBoundaryItem, ResponseBuilder, ResponsePart},
+    response::{Response, ResponseBuilder, ResponseObjectRef, ResponsePart},
     sources::{Executor, ExecutorInput, SubscriptionInput},
 };
 
@@ -76,7 +76,7 @@ impl<'ctx> ExecutionCoordinator<'ctx> {
         let new_execution = || {
             let mut response = ResponseBuilder::new(self.operation_plan.root_object_id);
             OperationRootPlanExecution {
-                root_response_part: response.new_part(root_plan_boundary_ids),
+                root_response_part: response.new_writer(root_plan_boundary_ids),
                 operation_execution: OperationExecution {
                     coordinator: &self,
                     futures: ExecutorFutureSet::new(),
@@ -179,13 +179,7 @@ impl SubscriptionExecution<'_> {
                             futures.push_back(operation_execution.execute());
                         }
                         Err(error) => {
-                            let response = ResponseBuilder::new(self.coordinator.operation_plan.root_object_id)
-                                .with_error(error)
-                                .build(
-                                    self.coordinator.ctx.engine.schema.clone(),
-                                    self.coordinator.operation_plan.clone(),
-                                );
-                            if responses.send(response).await.is_err() {
+                            if responses.send(Response::execution_failure(error)).await.is_err() {
                                 return;
                             }
                         }
@@ -202,11 +196,11 @@ pub struct OperationRootPlanExecution<'ctx> {
 }
 
 impl OperationRootPlanExecution<'_> {
-    pub fn root_response_part(&mut self) -> &mut ResponsePart {
-        &mut self.root_response_part
+    pub fn root_response_part(&self) -> &ResponsePart {
+        &self.root_response_part
     }
 
-    pub fn root_response_boundary_item(&self) -> ResponseBoundaryItem {
+    pub fn root_response_boundary_item(&self) -> ResponseObjectRef {
         self.operation_execution
             .response
             .root_response_boundary_item()
@@ -238,7 +232,7 @@ impl<'ctx> OperationExecution<'ctx> {
                 Ok(output) => output,
                 Err(err) => {
                     tracing::trace!(%plan_id, "Failed");
-                    self.response.push_error(err);
+                    todo!();
                     continue;
                 }
             };
@@ -278,7 +272,7 @@ impl<'ctx> OperationExecution<'ctx> {
 
         let execution_plan = &operation[plan_id];
         let plan = self.coordinator.plan_walker(plan_id);
-        let response_part = self.response.new_part(plan.output().boundary_ids);
+        let response_part = self.response.new_writer(plan.output().boundary_ids);
         let input = ExecutorInput {
             ctx: self.coordinator.ctx,
             plan,
@@ -315,7 +309,7 @@ impl<'a> ExecutorFutureSet<'a> {
     fn execute(
         &mut self,
         plan_id: PlanId,
-        response_boundary_items: Arc<Vec<ResponseBoundaryItem>>,
+        response_boundary_items: Arc<Vec<ResponseObjectRef>>,
         executor: Executor<'a>,
     ) {
         self.0.push(Box::pin(make_send_on_wasm(async move {
@@ -339,6 +333,6 @@ impl<'a> ExecutorFutureSet<'a> {
 
 struct ExecutorFutureResult {
     plan_id: PlanId,
-    response_boundary_items: Arc<Vec<ResponseBoundaryItem>>,
+    response_boundary_items: Arc<Vec<ResponseObjectRef>>,
     result: ExecutionResult<ResponsePart>,
 }

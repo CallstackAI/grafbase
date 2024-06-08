@@ -9,7 +9,7 @@ use schema::Schema;
 pub use value::{ResponseObject, ResponseValue};
 pub use write::*;
 
-use crate::{http_response::HttpGraphqlResponse, plan::OperationPlan};
+use crate::{execution::ExecutionError, http_response::HttpGraphqlResponse, plan::OperationPlan};
 
 mod error;
 mod key;
@@ -20,7 +20,10 @@ mod write;
 
 pub(crate) enum Response {
     Initial(InitialResponse),
-    /// Engine could not execute the request.
+    /// Engine could not process the request at all, but request was valid.
+    /// Meaning `data` field is present, but null.
+    ExecutionFailure(ExecutionFailureResponse),
+    /// Invalid request
     BadRequest(BadRequestResponse),
 }
 
@@ -41,19 +44,29 @@ pub(crate) struct BadRequestResponse {
     errors: Vec<GraphqlError>,
 }
 
+pub(crate) struct ExecutionFailureResponse {
+    errors: Vec<GraphqlError>,
+}
+
 impl Response {
-    pub(crate) fn from_error(error: impl Into<GraphqlError>) -> Self {
+    pub(crate) fn bad_request(error: impl Into<GraphqlError>) -> Self {
         Self::BadRequest(BadRequestResponse {
             errors: vec![error.into()],
         })
     }
 
-    pub(crate) fn from_errors<E>(errors: impl IntoIterator<Item = E>) -> Self
+    pub(crate) fn bad_request_from_errors<E>(errors: impl IntoIterator<Item = E>) -> Self
     where
         E: Into<GraphqlError>,
     {
         Self::BadRequest(BadRequestResponse {
             errors: errors.into_iter().map(Into::into).collect(),
+        })
+    }
+
+    pub(crate) fn execution_failure(error: impl Into<GraphqlError>) -> Self {
+        Self::ExecutionFailure(ExecutionFailureResponse {
+            errors: vec![error.into()],
         })
     }
 
@@ -69,6 +82,10 @@ impl Response {
                     }
                 }
             }
+            Self::ExecutionFailure(resp) => GraphqlResponseStatus::FieldError {
+                count: resp.errors.len() as u64,
+                data_is_null: true,
+            },
             Self::BadRequest(resp) => GraphqlResponseStatus::RequestError {
                 count: resp.errors.len() as u64,
             },

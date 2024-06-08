@@ -100,9 +100,13 @@ fn ingest_response(
     plan: PlanWalker<'_>,
     subgraph_response: serde_json::Value,
 ) {
-    let boundary_item = execution.root_response_boundary_item();
-    let response_part = execution.root_response_part();
-
-    let seed_ctx = plan.new_seed(response_part);
-    ingest_deserializer_into_response(&seed_ctx, seed_ctx.create_root_seed(&boundary_item), subgraph_response);
+    ingest_deserializer_into_response(
+        execution.root_response_part(),
+        None,
+        execution
+            .root_response_part()
+            .next_seed(plan)
+            .expect("Must have a root object to update"),
+        subgraph_response,
+    );
 }

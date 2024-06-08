@@ -1,7 +1,12 @@
 mod deserialize;
 mod ids;
 
-use std::sync::Arc;
+use std::{
+    borrow::Borrow,
+    cell::{RefCell, RefMut},
+    rc::Rc,
+    sync::Arc,
+};
 
 pub(crate) use deserialize::SeedContext;
 use id_newtypes::IdRange;
@@ -9,21 +14,31 @@ pub use ids::*;
 use itertools::Either;
 use schema::{ObjectId, Schema};
 
+use self::deserialize::UpdateSeed;
+
 use super::{
-    GraphqlError, InitialResponse, Response, ResponseBoundaryItem, ResponseData, ResponseEdge, ResponseObject,
+    GraphqlError, InitialResponse, Response, ResponseData, ResponseEdge, ResponseObject, ResponseObjectRef,
     ResponsePath, ResponseValue, UnpackedResponseEdge,
 };
-use crate::plan::{OperationPlan, PlanBoundaryId};
+use crate::plan::{OperationPlan, PlanBoundaryId, PlanWalker};
 
-#[derive(Default)]
 pub(crate) struct ResponseDataPart {
+    id: ResponseDataPartId,
     objects: Vec<ResponseObject>,
     lists: Vec<ResponseValue>,
 }
 
 impl ResponseDataPart {
+    fn new(id: ResponseDataPartId) -> Self {
+        Self {
+            id,
+            objects: Vec::new(),
+            lists: Vec::new(),
+        }
+    }
+
     fn is_empty(&self) -> bool {
-        self.objects.is_empty()
+        self.objects.is_empty() && self.lists.is_empty()
     }
 }
 
@@ -41,57 +56,66 @@ pub(crate) struct ResponseBuilder {
 // happen.
 impl ResponseBuilder {
     pub fn new(root_object_id: ObjectId) -> Self {
-        let mut builder = ResponsePart::new(ResponseDataPartId::from(0), IdRange::empty());
-        let root_id = builder.push_object(ResponseObject::default());
+        let mut initial_part = ResponseDataPart {
+            id: ResponseDataPartId::from(0),
+            objects: Vec::new(),
+            lists: Vec::new(),
+        };
+        let root_id = initial_part.push_object(ResponseObject::default());
         Self {
             root: Some((root_id, root_object_id)),
-            parts: vec![builder.data],
-            errors: vec![],
+            parts: vec![initial_part],
+            errors: Vec::new(),
         }
     }
 
-    pub fn new_part(&mut self, boundary_ids: IdRange<PlanBoundaryId>) -> ResponsePart {
+    pub fn new_writer(
+        &mut self,
+        root_response_objects: Arc<Vec<ResponseObjectRef>>,
+        plan_boundary_ids: IdRange<PlanBoundaryId>,
+    ) -> ResponsePart {
         let id = ResponseDataPartId::from(self.parts.len());
         // reserving the spot until the actual data is written. It's safe as no one can reference
         // any data in this part before it's added. And a part can only be overwritten if it's
         // empty.
-        self.parts.push(ResponseDataPart::default());
-        ResponsePart::new(id, boundary_ids)
+        self.parts.push(ResponseDataPart::new(id));
+        ResponsePart::new(ResponseDataPart::new(id), root_response_objects, plan_boundary_ids)
     }
 
-    pub fn root_response_boundary_item(&self) -> Option<ResponseBoundaryItem> {
-        self.root.map(|(response_object_id, object_id)| ResponseBoundaryItem {
-            response_object_id,
-            response_path: ResponsePath::default(),
-            object_id,
+    pub fn root_response_boundary_item(&self) -> Option<ResponseObjectRef> {
+        self.root.map(|(response_object_id, object_id)| ResponseObjectRef {
+            id: response_object_id,
+            path: ResponsePath::default(),
+            definition_id: object_id,
         })
     }
 
-    pub fn ingest(&mut self, output: ResponsePart) -> Vec<(PlanBoundaryId, Vec<ResponseBoundaryItem>)> {
-        let reservation = &mut self.parts[usize::from(output.id)];
+    pub fn ingest(&mut self, part: ResponsePart) -> Vec<(PlanBoundaryId, Vec<ResponseObjectRef>)> {
+        let part = Rc::into_inner(part.inner)
+            .expect("All use of ResponsePart must be finished by now.")
+            .into_inner();
+
+        let reservation = &mut self.parts[usize::from(part.data.id)];
         assert!(reservation.is_empty(), "Part already has data");
-        *reservation = output.data;
-        self.errors.extend(output.errors);
-        for update in output.updates {
-            self[update.id].extend(update.fields);
+        *reservation = part.data;
+
+        self.errors.extend(part.errors);
+        for (update, obj_ref) in part.updates.into_iter().zip(part.root_response_objects.iter()) {
+            match update {
+                UpdateSlot::Reserved => todo!(),
+                UpdateSlot::Fields(fields) => {
+                    self[obj_ref.id].extend(fields);
+                }
+                UpdateSlot::Error => {
+                    self.propagate_error(&obj_ref.path);
+                }
+            }
         }
-        for path in output.error_paths_to_propagate {
+        for path in part.error_paths_to_propagate {
             self.propagate_error(&path);
         }
         // The boundary objects are only accessible after we ingested them
-        output.plan_boundaries
-    }
-
-    // FIXME: this method is improperly used, when pushing an error we need to propagate it which
-    // parent callers never do currently. It's a bit tricky to handle that correctly in the
-    // Coordinator during the planning phase.
-    pub fn push_error(&mut self, error: impl Into<GraphqlError>) {
-        self.errors.push(error.into());
-    }
-
-    pub fn with_error(mut self, error: impl Into<GraphqlError>) -> Self {
-        self.push_error(error);
-        self
+        part.plan_boundaries
     }
 
     pub fn build(self, schema: Arc<Schema>, operation: Arc<OperationPlan>) -> Response {
@@ -205,73 +229,140 @@ pub enum ResponseValueId {
     },
 }
 
+#[derive(Clone)]
 pub(crate) struct ResponsePart {
-    id: ResponseDataPartId,
+    /// We end up writing objects or lists at various step of the de-serialization / query
+    /// traversal, so having a RefCell is by far the easiest. We don't need a lock as executor are
+    /// not expected to parallelize their work.
+    /// The Rc makes it possible to write errors at one place and the data in another.
+    inner: Rc<RefCell<ResponsePartInner>>,
+}
+
+pub(crate) struct ResponsePartInner {
     data: ResponseDataPart,
+    root_response_objects: Arc<Vec<ResponseObjectRef>>,
     errors: Vec<GraphqlError>,
-    updates: Vec<ResponseObjectUpdate>,
+    updates: Vec<UpdateSlot>,
     error_paths_to_propagate: Vec<ResponsePath>,
     plan_boundary_ids_start: usize,
-    plan_boundaries: Vec<(PlanBoundaryId, Vec<ResponseBoundaryItem>)>,
+    plan_boundaries: Vec<(PlanBoundaryId, Vec<ResponseObjectRef>)>,
 }
 
 impl ResponsePart {
-    pub fn new(id: ResponseDataPartId, plan_boundary_ids: IdRange<PlanBoundaryId>) -> ResponsePart {
-        ResponsePart {
-            id,
-            data: ResponseDataPart::default(),
+    fn new(
+        data: ResponseDataPart,
+        root_response_objects: Arc<Vec<ResponseObjectRef>>,
+        plan_boundary_ids: IdRange<PlanBoundaryId>,
+    ) -> ResponsePart {
+        let inner = ResponsePartInner {
+            data,
+            root_response_objects,
             errors: Vec::new(),
             updates: Vec::new(),
             error_paths_to_propagate: Vec::new(),
             plan_boundary_ids_start: usize::from(plan_boundary_ids.start),
             plan_boundaries: plan_boundary_ids.map(|id| (id, Vec::new())).collect(),
+        };
+        Self {
+            inner: Rc::new(RefCell::new(inner)),
         }
     }
 
-    pub fn push_update(&mut self, update: ResponseObjectUpdate) {
-        self.updates.push(update);
+    pub fn next_seed<'ctx>(&self, plan: PlanWalker<'ctx>) -> Option<UpdateSeed<'ctx>> {
+        self.next_writer().map(|writer| UpdateSeed::new(plan, writer))
     }
 
-    pub fn push_error(&mut self, error: impl Into<GraphqlError>) {
-        self.errors.push(error.into());
+    pub fn next_writer(&self) -> Option<ResponseWriter> {
+        let index = {
+            let mut inner = self.inner.borrow_mut();
+            if inner.updates.len() == inner.data.objects.len() {
+                return None;
+            }
+            inner.updates.push(UpdateSlot::Reserved);
+            inner.updates.len() - 1
+        };
+        Some(ResponseWriter {
+            index,
+            part: self.clone(),
+        })
     }
 
-    pub fn push_errors(&mut self, errors: Vec<GraphqlError>) {
-        self.errors.extend(errors);
+    pub fn push_error(&self, error: impl Into<GraphqlError>) {
+        self.inner.borrow_mut().errors.push(error.into());
     }
 
-    pub fn push_error_path_to_propagate(&mut self, path: ResponsePath) {
-        self.error_paths_to_propagate.push(path);
-    }
-
-    pub fn has_errors(&self) -> bool {
-        !self.errors.is_empty()
-    }
-
-    pub fn errors_count(&self) -> usize {
-        self.errors.len()
-    }
-
-    /// This does not change how errors were propagated.
-    pub fn replace_errors(&mut self, errors: Vec<GraphqlError>) {
-        self.errors = errors;
+    pub fn push_errors(&self, errors: Vec<GraphqlError>) {
+        self.inner.borrow_mut().errors.extend(errors);
     }
 }
 
-impl std::ops::Index<PlanBoundaryId> for ResponsePart {
-    type Output = Vec<ResponseBoundaryItem>;
+pub struct ResponseWriter {
+    index: usize,
+    part: ResponsePart,
+}
 
-    fn index(&self, id: PlanBoundaryId) -> &Self::Output {
-        let n = usize::from(id) - self.plan_boundary_ids_start;
-        &self.plan_boundaries[n].1
+impl ResponseWriter {
+    fn part(&self) -> RefMut<'_, ResponsePartInner> {
+        self.part.inner.borrow_mut()
+    }
+
+    pub fn root_path(&self) -> ResponsePath {
+        RefCell::borrow(&self.part.inner).root_response_objects[self.index]
+            .path
+            .clone()
+    }
+
+    pub fn push_object(&self, object: ResponseObject) -> ResponseObjectId {
+        self.part().data.push_object(object)
+    }
+
+    pub fn push_list(&self, value: &[ResponseValue]) -> ResponseListId {
+        self.part().data.push_list(value)
+    }
+
+    pub fn update_root_object_with(&self, fields: Vec<(ResponseEdge, ResponseValue)>) {
+        self.part().updates[self.index] = UpdateSlot::Fields(fields);
+    }
+
+    pub fn propagate_error(&self, error: impl Into<GraphqlError>) {
+        let mut part = self.part();
+        part.errors.push(error.into());
+        part.updates[self.index] = UpdateSlot::Error;
+    }
+
+    pub fn continue_error_propagation(&self) {
+        self.part().updates[self.index] = UpdateSlot::Error;
+    }
+
+    pub fn push_error(&self, error: impl Into<GraphqlError>) {
+        self.part().errors.push(error.into());
+    }
+
+    pub fn push_errors(&self, errors: Vec<GraphqlError>) {
+        self.part().errors.extend(errors);
     }
 }
 
-impl std::ops::IndexMut<PlanBoundaryId> for ResponsePart {
-    fn index_mut(&mut self, id: PlanBoundaryId) -> &mut Self::Output {
-        let n = usize::from(id) - self.plan_boundary_ids_start;
-        &mut self.plan_boundaries[n].1
-    }
+// impl std::ops::Index<PlanBoundaryId> for ResponseWriter {
+//     type Output = Vec<ResponseObjectRef>;
+//
+//     fn index(&self, id: PlanBoundaryId) -> &Self::Output {
+//         let n = usize::from(id) - self.plan_boundary_ids_start;
+//         &self.plan_boundaries[n].1
+//     }
+// }
+//
+// impl std::ops::IndexMut<PlanBoundaryId> for ResponseWriter {
+//     fn index_mut(&mut self, id: PlanBoundaryId) -> &mut Self::Output {
+//         let n = usize::from(id) - self.plan_boundary_ids_start;
+//         &mut self.plan_boundaries[n].1
+//     }
+// }
+
+enum UpdateSlot {
+    Reserved,
+    Fields(Vec<(ResponseEdge, ResponseValue)>),
+    Error,
 }
 
 pub struct ResponseObjectUpdate {

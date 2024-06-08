@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use grafbase_tracing::span::{subgraph::SubgraphRequestSpan, GqlRecorderSpanExt};
+use grafbase_tracing::span::subgraph::SubgraphRequestSpan;
 use runtime::fetch::FetchRequest;
 use schema::{
     sources::graphql::{FederationEntityResolverWalker, GraphqlEndpointId, GraphqlEndpointWalker},
@@ -12,7 +12,7 @@ use crate::{
     execution::ExecutionContext,
     operation::OperationType,
     plan::{PlanWalker, PlanningResult},
-    response::{ResponseBoundaryItem, ResponsePart},
+    response::{ResponseObjectRef, ResponsePart},
     sources::{ExecutionResult, Executor, ExecutorInput, Plan},
 };
 
@@ -94,21 +94,21 @@ pub(crate) struct FederationEntityExecutor<'ctx> {
     subgraph: GraphqlEndpointWalker<'ctx>,
     operation: &'ctx PreparedFederationEntityOperation,
     json_body: String,
-    response_boundary_items: Arc<Vec<ResponseBoundaryItem>>,
+    response_boundary_items: Arc<Vec<ResponseObjectRef>>,
     plan: PlanWalker<'ctx>,
     response_part: ResponsePart,
 }
 
 impl<'ctx> FederationEntityExecutor<'ctx> {
     #[tracing::instrument(skip_all, fields(plan_id = %self.plan.id(), federated_subgraph = %self.subgraph.name()))]
-    pub async fn execute(mut self) -> ExecutionResult<ResponsePart> {
-        let subgraph_request_span = SubgraphRequestSpan::new(self.subgraph.name())
+    pub async fn execute(self) -> ExecutionResult<ResponsePart> {
+        let subgraph_gql_request_span = SubgraphRequestSpan::new(self.subgraph.name())
             .with_operation_type(OperationType::Query.as_ref())
             // The query string contains no input values, only variables. So it's safe to log.
             .with_document(&self.operation.query)
             .into_span();
 
-        let status = async {
+        async {
             let bytes = self
                 .ctx
                 .engine
@@ -135,22 +135,18 @@ impl<'ctx> FederationEntityExecutor<'ctx> {
                 .bytes;
             tracing::debug!("{}", String::from_utf8_lossy(&bytes));
 
-            let seed_ctx = self.plan.new_seed(&mut self.response_part);
-            ExecutionResult::Ok(ingest_deserializer_into_response(
-                &seed_ctx,
+            ingest_deserializer_into_response(
+                &self.response_part,
+                Some(subgraph_gql_request_span.clone()),
                 EntitiesDataSeed {
-                    ctx: seed_ctx.clone(),
-                    response_boundary: &self.response_boundary_items,
+                    response_part: &self.response_part,
+                    plan: self.plan,
                 },
                 &mut serde_json::Deserializer::from_slice(&bytes),
-            ))
+            )
         }
-        .instrument(subgraph_request_span.clone())
+        .instrument(subgraph_gql_request_span.clone())
         .await?;
-
-        if let Some(status) = status {
-            subgraph_request_span.record_gql_status(status)
-        }
 
         Ok(self.response_part)
     }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use schema::Schema;
 
-use crate::response::{ResponseBoundaryItem, ResponseBuilder};
+use crate::response::{ResponseBuilder, ResponseObjectRef};
 
 use crate::plan::{OperationPlan, PlanBoundaryId};
 
@@ -30,7 +30,7 @@ pub struct OperationExecutionState {
 
 #[derive(Clone)]
 struct BoundaryItems {
-    items: Arc<Vec<ResponseBoundaryItem>>,
+    items: Arc<Vec<ResponseObjectRef>>,
     consummers_left: u8,
 }
 
@@ -60,7 +60,7 @@ impl OperationExecutionState {
             .collect()
     }
 
-    pub fn push_boundary_items(&mut self, boundary_id: PlanBoundaryId, items: Vec<ResponseBoundaryItem>) {
+    pub fn push_boundary_items(&mut self, boundary_id: PlanBoundaryId, items: Vec<ResponseObjectRef>) {
         self.boundaries[usize::from(boundary_id)] = Some(BoundaryItems {
             items: Arc::new(items),
             consummers_left: self.plan_boundary_consummers_count[usize::from(boundary_id)],
@@ -73,7 +73,7 @@ impl OperationExecutionState {
         operation: &OperationPlan,
         response: &ResponseBuilder,
         plan_id: PlanId,
-    ) -> Arc<Vec<ResponseBoundaryItem>> {
+    ) -> Arc<Vec<ResponseObjectRef>> {
         // If there is no root, an error propagated up to it and data will be null. So there's
         // nothing to do anymore.
         let Some(root_boundary_item) = response.root_response_boundary_item() else {
@@ -102,19 +102,19 @@ impl OperationExecutionState {
                 Arc::new(
                     items
                         .iter()
-                        .filter(|root| possible_types.binary_search(&root.object_id).is_ok())
+                        .filter(|root| possible_types.binary_search(&root.definition_id).is_ok())
                         .cloned()
                         .collect(),
                 )
             }
             Some(FlatTypeCondition::Objects(ids)) if ids.len() == 1 => {
                 let id = ids[0];
-                Arc::new(items.iter().filter(|root| root.object_id == id).cloned().collect())
+                Arc::new(items.iter().filter(|root| root.definition_id == id).cloned().collect())
             }
             Some(FlatTypeCondition::Objects(ids)) => Arc::new(
                 items
                     .iter()
-                    .filter(|root| ids.binary_search(&root.object_id).is_ok())
+                    .filter(|root| ids.binary_search(&root.definition_id).is_ok())
                     .cloned()
                     .collect(),
             ),

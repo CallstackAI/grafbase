@@ -4,6 +4,8 @@ use crate::response::GraphqlError;
 pub enum ExecutionError {
     #[error("Internal error: {0}")]
     Internal(String),
+    #[error("Deserialization error: {0}")]
+    DeserializationError(String),
     #[error(transparent)]
     Fetch(#[from] runtime::fetch::FetchError),
 }

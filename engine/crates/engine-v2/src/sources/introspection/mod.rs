@@ -1,11 +1,5 @@
-use std::cell::RefCell;
-
 use super::{ExecutionError, Executor, ExecutorInput};
-use crate::{
-    execution::ExecutionContext,
-    plan::PlanWalker,
-    response::{ResponseBoundaryItem, ResponsePart},
-};
+use crate::{execution::ExecutionContext, plan::PlanWalker, response::ResponsePart};
 
 mod writer;
 
@@ -17,36 +11,34 @@ impl IntrospectionExecutionPlan {
         &'ctx self,
         ExecutorInput {
             ctx,
-            boundary_objects_view: root_response_objects,
             plan,
-            response_part: output,
+            response_part,
+            ..
         }: ExecutorInput<'ctx, '_>,
     ) -> Result<Executor<'ctx>, ExecutionError> {
         Ok(Executor::Introspection(IntrospectionExecutor {
             ctx,
-            response_object: root_response_objects.into_single_boundary_item(),
             plan,
-            output,
+            response_part,
         }))
     }
 }
 
 pub(crate) struct IntrospectionExecutor<'ctx> {
     ctx: ExecutionContext<'ctx>,
-    response_object: ResponseBoundaryItem,
     plan: PlanWalker<'ctx>,
-    output: ResponsePart,
+    response_part: ResponsePart,
 }
 
 impl<'ctx> IntrospectionExecutor<'ctx> {
-    pub async fn execute(mut self) -> Result<ResponsePart, ExecutionError> {
+    pub async fn execute(self) -> Result<ResponsePart, ExecutionError> {
         writer::IntrospectionWriter {
             schema: self.ctx.engine.schema.walker(),
             metadata: self.ctx.engine.schema.walker().introspection_metadata(),
             plan: self.plan,
-            output: RefCell::new(&mut self.output),
+            response: self.response_part.next_writer().ok_or_else(|| "No objects to update")?,
         }
-        .update_output(self.response_object);
-        Ok(self.output)
+        .execute();
+        Ok(self.response_part)
     }
 }

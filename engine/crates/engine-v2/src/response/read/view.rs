@@ -9,20 +9,20 @@ use crate::response::{ResponseBuilder, ResponseListId, ResponseObject, ResponseO
 pub struct ResponseBoundaryObjectsView<'a> {
     pub(super) schema: SchemaWalker<'a, ()>,
     pub(super) response: &'a ResponseBuilder,
-    pub(super) items: Arc<Vec<ResponseBoundaryItem>>,
+    pub(super) items: Arc<Vec<ResponseObjectRef>>,
     pub(super) selection_set: Cow<'a, ReadSelectionSet>,
     pub(super) extra_constant_fields: Vec<(String, serde_json::Value)>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ResponseBoundaryItem {
-    pub response_object_id: ResponseObjectId,
-    pub response_path: ResponsePath,
-    pub object_id: ObjectId,
+pub struct ResponseObjectRef {
+    pub id: ResponseObjectId,
+    pub path: ResponsePath,
+    pub definition_id: ObjectId,
 }
 
 impl<'a> ResponseBoundaryObjectsView<'a> {
-    pub fn into_single_boundary_item(self) -> ResponseBoundaryItem {
+    pub fn into_single_boundary_item(self) -> ResponseObjectRef {
         self.items
             .iter()
             .next()
@@ -31,7 +31,7 @@ impl<'a> ResponseBoundaryObjectsView<'a> {
     }
 
     // Guaranteed to be in the same order as the response objects themselves
-    pub fn items(&self) -> &Arc<Vec<ResponseBoundaryItem>> {
+    pub fn items(&self) -> &Arc<Vec<ResponseObjectRef>> {
         &self.items
     }
 
@@ -54,7 +54,7 @@ impl<'a> serde::Serialize for ResponseBoundaryObjectsView<'a> {
             seq.serialize_element(&SerializableFilteredResponseObject {
                 schema: self.schema,
                 response: self.response,
-                response_object: &self.response[item.response_object_id],
+                response_object: &self.response[item.id],
                 selection_set: &self.selection_set,
                 extra_constant_fields: &self.extra_constant_fields,
             })?;

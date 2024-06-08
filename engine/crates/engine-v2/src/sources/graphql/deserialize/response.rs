@@ -1,43 +1,48 @@
 use std::fmt;
 
-use grafbase_tracing::gql_response_status::GraphqlResponseStatus;
+use grafbase_tracing::{gql_response_status::GraphqlResponseStatus, span::GqlRecorderSpanExt};
 use serde::{
     de::{DeserializeSeed, IgnoredAny, MapAccess, Visitor},
     Deserializer,
 };
+use tracing::Span;
 
 use super::errors::UpstreamGraphqlErrorsSeed;
-use crate::response::{GraphqlError, SeedContext};
+use crate::{
+    execution::{ExecutionError, ExecutionResult},
+    response::ResponsePart,
+};
 
-pub fn ingest_deserializer_into_response<'ctx, 'de, DataSeed, D>(
-    ctx: &SeedContext<'ctx>,
+pub fn ingest_deserializer_into_response<'part, 'de, DataSeed, D>(
+    part: &'part ResponsePart,
+    sugraph_gql_request_span: Option<Span>,
     seed: DataSeed,
     deserializer: D,
-) -> Option<GraphqlResponseStatus>
+) -> ExecutionResult<()>
 where
     D: Deserializer<'de>,
     DataSeed: DeserializeSeed<'de, Value = ()>,
 {
-    let result = GraphqlResponseSeed { ctx, seed: Some(seed) }.deserialize(deserializer);
-    match result {
-        Ok(status) => Some(status),
-        Err(err) => {
-            report_error_if_no_others(ctx, format!("Error decoding response from upstream: {err}"));
-            None
-        }
+    GraphqlResponseSeed {
+        part,
+        sugraph_gql_request_span,
+        seed: Some(seed),
     }
+    .deserialize(deserializer)
+    .map_err(|err| ExecutionError::DeserializationError(err.to_string()))
 }
 
-struct GraphqlResponseSeed<'ctx, 'parent, DataSeed> {
-    ctx: &'parent SeedContext<'ctx>,
+struct GraphqlResponseSeed<'parent, DataSeed> {
+    part: &'parent ResponsePart,
+    sugraph_gql_request_span: Option<Span>,
     seed: Option<DataSeed>,
 }
 
-impl<'ctx, 'parent, 'de, DataSeed> DeserializeSeed<'de> for GraphqlResponseSeed<'ctx, 'parent, DataSeed>
+impl<'part, 'de, DataSeed> DeserializeSeed<'de> for GraphqlResponseSeed<'part, DataSeed>
 where
     DataSeed: DeserializeSeed<'de, Value = ()>,
 {
-    type Value = GraphqlResponseStatus;
+    type Value = ();
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -47,11 +52,11 @@ where
     }
 }
 
-impl<'ctx, 'parent, 'de, DataSeed> Visitor<'de> for GraphqlResponseSeed<'ctx, 'parent, DataSeed>
+impl<'part, 'de, DataSeed> Visitor<'de> for GraphqlResponseSeed<'part, DataSeed>
 where
     DataSeed: DeserializeSeed<'de, Value = ()>,
 {
-    type Value = GraphqlResponseStatus;
+    type Value = ();
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("a valid GraphQL response")
@@ -61,18 +66,13 @@ where
     where
         A: MapAccess<'de>,
     {
-        let mut data_result = DataSeedResult {
-            is_null: true,
-            err: None,
-        };
+        let mut data_is_null_result = Ok(true);
         let mut errors = vec![];
         while let Some(key) = map.next_key::<ResponseKey>()? {
             match key {
                 ResponseKey::Data => match self.seed.take() {
                     Some(seed) => {
-                        data_result = map
-                            .next_value_seed(InfaillibleNullableSeed { seed })
-                            .expect("Infaillible by design.");
+                        data_is_null_result = map.next_value_seed(NullableDataSeed { seed });
                     }
                     None => continue,
                 },
@@ -82,58 +82,38 @@ where
                 }
             };
         }
-        let data_is_present = self.seed.is_some();
-        let errors_count = {
-            let mut part = self.ctx.borrow_mut_response_part();
-            if !errors.is_empty() {
-                // Replacing the any serde errors if the data is null/isn't present, they're not relevant anymore
-                // since our request completely failed
-                if data_result.is_null {
-                    part.replace_errors(errors);
-                } else {
-                    part.push_errors(errors);
-                }
-            } else if data_result.is_null {
-                part.push_error(GraphqlError {
-                    message: "Data is null or missing".to_string(),
-                    ..Default::default()
-                });
-            }
 
-            part.errors_count()
-        };
-
-        Ok(if errors_count > 0 {
-            if data_is_present {
+        if let Some(span) = self.sugraph_gql_request_span {
+            let data_is_present = self.seed.is_some();
+            let status = if errors.is_empty() {
+                GraphqlResponseStatus::Success
+            } else if data_is_present {
                 GraphqlResponseStatus::FieldError {
-                    count: errors_count as u64,
-                    data_is_null: data_result.is_null,
+                    count: errors.len() as u64,
+                    data_is_null: data_is_null_result?,
                 }
             } else {
                 GraphqlResponseStatus::RequestError {
-                    count: errors_count as u64,
+                    count: errors.len() as u64,
                 }
-            }
-        } else {
-            GraphqlResponseStatus::Success
-        })
+            };
+            span.record_gql_status(status);
+        }
+
+        self.part.push_errors(errors);
+        Ok(())
     }
 }
 
-struct InfaillibleNullableSeed<Seed> {
+struct NullableDataSeed<Seed> {
     seed: Seed,
 }
 
-struct DataSeedResult {
-    is_null: bool,
-    err: Option<String>,
-}
-
-impl<'de, Seed> DeserializeSeed<'de> for InfaillibleNullableSeed<Seed>
+impl<'de, Seed> DeserializeSeed<'de> for NullableDataSeed<Seed>
 where
     Seed: DeserializeSeed<'de, Value = ()>,
 {
-    type Value = DataSeedResult;
+    type Value = bool;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -143,11 +123,11 @@ where
     }
 }
 
-impl<'de, Seed> Visitor<'de> for InfaillibleNullableSeed<Seed>
+impl<'de, Seed> Visitor<'de> for NullableDataSeed<Seed>
 where
     Seed: DeserializeSeed<'de, Value = ()>,
 {
-    type Value = DataSeedResult;
+    type Value = bool;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("a nullable value")
@@ -164,20 +144,15 @@ where
     where
         E: serde::de::Error,
     {
-        Ok(DataSeedResult {
-            is_null: true,
-            err: None,
-        })
+        Ok(true)
     }
 
     fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: Deserializer<'de>,
     {
-        Ok(DataSeedResult {
-            is_null: false,
-            err: self.seed.deserialize(deserializer).map_err(|err| err.to_string()).err(),
-        })
+        self.seed.deserialize(deserializer)?;
+        Ok(false)
     }
 }
 
@@ -188,15 +163,4 @@ enum ResponseKey {
     Errors,
     #[serde(other)]
     Unknown,
-}
-
-fn report_error_if_no_others(ctx: &SeedContext<'_>, message: String) {
-    let mut response_part = ctx.borrow_mut_response_part();
-    // Only adding this if no other more precise errors were added.
-    if !response_part.has_errors() {
-        response_part.push_error(GraphqlError {
-            message,
-            ..Default::default()
-        });
-    }
 }
