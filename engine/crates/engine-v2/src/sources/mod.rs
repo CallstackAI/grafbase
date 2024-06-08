@@ -148,7 +148,7 @@ impl<'ctx> SubscriptionExecutor<'ctx> {
     pub async fn execute(
         self,
         new_execution: impl Fn() -> OperationRootPlanExecution<'ctx> + Send + 'ctx,
-    ) -> ExecutionResult<BoxStream<'ctx, OperationRootPlanExecution<'ctx>>> {
+    ) -> ExecutionResult<BoxStream<'ctx, ExecutionResult<OperationRootPlanExecution<'ctx>>>> {
         match self {
             SubscriptionExecutor::Graphql(executor) => executor.execute(new_execution).await,
         }

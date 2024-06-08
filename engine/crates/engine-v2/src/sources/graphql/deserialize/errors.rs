@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{de::DeserializeSeed, Deserializer};
 
-use crate::response::{GraphqlError, ResponsePath};
+use crate::response::GraphqlError;
 
 #[derive(serde::Deserialize)]
 pub(super) struct UpstreamGraphqlError {
@@ -16,7 +16,6 @@ pub(super) struct UpstreamGraphqlError {
 }
 
 pub(super) struct UpstreamGraphqlErrorsSeed<'a> {
-    pub path: &'a ResponsePath,
     pub errors: &'a mut Vec<GraphqlError>,
 }
 
@@ -41,9 +40,8 @@ impl<'de, 'a> DeserializeSeed<'de> for UpstreamGraphqlErrorsSeed<'a> {
             }
             self.errors.push(GraphqlError {
                 message: format!("Upstream error: {}", error.message),
-                locations: vec![],
-                path: Some(self.path.clone()),
                 extensions,
+                ..Default::default()
             });
         }
         Ok(())

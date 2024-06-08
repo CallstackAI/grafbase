@@ -134,13 +134,10 @@ impl<'ctx> FederationEntityExecutor<'ctx> {
                 .await?
                 .bytes;
             tracing::debug!("{}", String::from_utf8_lossy(&bytes));
-            let root_err_path = self
-                .plan
-                .root_error_path(&self.response_boundary_items[0].response_path);
+
             let seed_ctx = self.plan.new_seed(&mut self.response_part);
             ExecutionResult::Ok(ingest_deserializer_into_response(
                 &seed_ctx,
-                &root_err_path,
                 EntitiesDataSeed {
                     ctx: seed_ctx.clone(),
                     response_boundary: &self.response_boundary_items,

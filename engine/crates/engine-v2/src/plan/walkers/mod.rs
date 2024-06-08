@@ -92,14 +92,14 @@ impl<'a> PlanWalker<'a> {
         SeedContext::new(self, output)
     }
 
-    pub fn root_error_path(&self, parent: &ResponsePath) -> ResponsePath {
-        let mut fields = self.collected_selection_set().fields();
-        if fields.len() == 1 {
-            parent.child(fields.next().unwrap().as_operation_field().response_edge())
-        } else {
-            parent.clone()
-        }
-    }
+    // pub fn root_error_path(&self, parent: &ResponsePath) -> ResponsePath {
+    //     let mut fields = self.collected_selection_set().fields();
+    //     if fields.len() == 1 {
+    //         parent.child(fields.next().unwrap().as_operation_field().response_edge())
+    //     } else {
+    //         parent.clone()
+    //     }
+    // }
 }
 
 impl<'a, Id> std::ops::Index<Id> for PlanWalker<'a>

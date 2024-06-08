@@ -2,18 +2,19 @@ use std::{borrow::Cow, sync::Arc};
 
 use async_runtime::make_send_on_wasm;
 use engine_parser::types::OperationType;
+use futures::stream::FuturesOrdered;
 use futures_util::{
     future::BoxFuture,
     stream::{BoxStream, FuturesUnordered},
-    Future, StreamExt,
+    StreamExt,
 };
 
 use crate::{
     execution::ExecutionContext,
     operation::{Operation, Variables},
     plan::{OperationExecutionState, OperationPlan, PlanId, PlanWalker},
-    response::{GraphqlError, Response, ResponseBoundaryItem, ResponseBuilder, ResponsePart},
-    sources::{Executor, ExecutorInput, SubscriptionExecutor, SubscriptionInput},
+    response::{Response, ResponseBoundaryItem, ResponseBuilder, ResponsePart},
+    sources::{Executor, ExecutorInput, SubscriptionInput},
 };
 
 use super::ExecutionResult;
@@ -63,7 +64,7 @@ impl<'ctx> ExecutionCoordinator<'ctx> {
         .await
     }
 
-    pub async fn execute_subscription(self, mut responses: impl ResponseSender) {
+    pub async fn execute_subscription(self, responses: impl ResponseSender) {
         assert!(matches!(self.operation_plan.ty, OperationType::Subscription));
 
         let (state, subscription_plan_id) = {
@@ -85,59 +86,113 @@ impl<'ctx> ExecutionCoordinator<'ctx> {
             }
         };
 
-        let mut stream = match self
+        let stream = match self
             .build_subscription_stream(subscription_plan_id, new_execution)
             .await
         {
             Ok(stream) => stream,
-            Err(error) => {
-                responses
-                    .send(
-                        ResponseBuilder::new(self.operation_plan.root_object_id)
-                            .with_error(error)
-                            .build(self.ctx.engine.schema.clone(), self.operation_plan.clone()),
-                    )
-                    .await
-                    .ok();
-                return;
-            }
+            Err(error) => Box::pin(futures_util::stream::iter(std::iter::once(Err(error)))),
         };
 
-        while let Some(OperationRootPlanExecution {
-            mut operation_execution,
-            root_response_part,
-        }) = stream.next().await
-        {
-            operation_execution.futures.push(async move {
-                ExecutorFutureResult {
-                    result: Ok(root_response_part),
-                    plan_id: subscription_plan_id,
-                }
-            });
-            let response = operation_execution.execute().await;
-            if responses.send(response).await.is_err() {
-                return;
-            }
+        SubscriptionExecution {
+            coordinator: &self,
+            subscription_plan_id,
+            stream,
         }
+        .execute(responses)
+        .await
     }
 
     async fn build_subscription_stream<'s, 'caller>(
         &'s self,
         plan_id: PlanId,
         new_execution: impl Fn() -> OperationRootPlanExecution<'caller> + Send + 'caller,
-    ) -> Result<BoxStream<'caller, OperationRootPlanExecution<'caller>>, GraphqlError>
+    ) -> ExecutionResult<BoxStream<'caller, ExecutionResult<OperationRootPlanExecution<'caller>>>>
     where
         's: 'caller,
     {
-        let executor = self.build_subscription_executor(plan_id)?;
-        Ok(executor.execute(new_execution).await?)
-    }
-
-    fn build_subscription_executor(&self, plan_id: PlanId) -> ExecutionResult<SubscriptionExecutor<'_>> {
         let execution_plan = &self.operation_plan[plan_id];
         let plan = self.plan_walker(plan_id);
         let input = SubscriptionInput { ctx: self.ctx, plan };
-        execution_plan.new_subscription_executor(input)
+        let executor = execution_plan.new_subscription_executor(input)?;
+        executor.execute(new_execution).await
+    }
+}
+
+struct SubscriptionExecution<'a> {
+    coordinator: &'a ExecutionCoordinator<'a>,
+    subscription_plan_id: PlanId,
+    stream: BoxStream<'a, ExecutionResult<OperationRootPlanExecution<'a>>>,
+}
+
+impl SubscriptionExecution<'_> {
+    async fn execute(self, mut responses: impl ResponseSender) {
+        let mut stream = self.stream.fuse();
+        let mut futures = FuturesOrdered::new();
+        loop {
+            let next_task = if !futures.is_empty() {
+                // If we have already enough ongoing futures we don't continue to poll the stream
+                // to apply some back pressure.
+                if futures.len() < 3 {
+                    // We try to finish ongoing responses first, but while waiting we continue
+                    // polling the stream for the next one.
+                    futures_util::select_biased! {
+                        next_response = futures.next() => Ok(next_response),
+                        next_execution = stream.next() => Err(next_execution),
+                    }
+                } else {
+                    Ok(futures.next().await)
+                }
+            } else {
+                Err(stream.next().await)
+            };
+            match next_task {
+                Ok(response) => {
+                    // Should never be None as we only wait for the futures if there is something
+                    // to wait for.
+                    if let Some(response) = response {
+                        if responses.send(response).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+                Err(execution) => {
+                    let Some(execution) = execution else {
+                        return;
+                    };
+                    match execution {
+                        Ok(OperationRootPlanExecution {
+                            mut operation_execution,
+                            root_response_part,
+                        }) => {
+                            operation_execution.futures.push_result(ExecutorFutureResult {
+                                result: Ok(root_response_part),
+                                response_boundary_items: Arc::new(
+                                    operation_execution
+                                        .response
+                                        .root_response_boundary_item()
+                                        .into_iter()
+                                        .collect(),
+                                ),
+                                plan_id: self.subscription_plan_id,
+                            });
+                            futures.push_back(operation_execution.execute());
+                        }
+                        Err(error) => {
+                            let response = ResponseBuilder::new(self.coordinator.operation_plan.root_object_id)
+                                .with_error(error)
+                                .build(
+                                    self.coordinator.ctx.engine.schema.clone(),
+                                    self.coordinator.operation_plan.clone(),
+                                );
+                            if responses.send(response).await.is_err() {
+                                return;
+                            }
+                        }
+                    };
+                }
+            }
+        }
     }
 }
 
@@ -170,15 +225,15 @@ impl<'ctx> OperationExecution<'ctx> {
     /// Runs a single execution to completion, returning its response
     async fn execute(mut self) -> Response {
         for plan_id in self.state.get_executable_plans() {
-            tracing::trace!(%plan_id, "Starting plan");
-            match self.build_executor(plan_id) {
-                Ok(Some(executor)) => self.futures.execute(plan_id, executor),
-                Ok(None) => (),
-                Err(error) => self.response.push_error(error),
-            }
+            self.spawn_executor(plan_id);
         }
 
-        while let Some(ExecutorFutureResult { result, plan_id }) = self.futures.next().await {
+        while let Some(ExecutorFutureResult {
+            plan_id,
+            response_boundary_items,
+            result,
+        }) = self.futures.next().await
+        {
             let output = match result {
                 Ok(output) => output,
                 Err(err) => {
@@ -198,11 +253,7 @@ impl<'ctx> OperationExecution<'ctx> {
                 .state
                 .get_next_executable_plans(&self.coordinator.operation_plan, plan_id)
             {
-                match self.build_executor(plan_id) {
-                    Ok(Some(executor)) => self.futures.execute(plan_id, executor),
-                    Ok(None) => (),
-                    Err(error) => self.response.push_error(error),
-                }
+                self.spawn_executor(plan_id);
             }
         }
 
@@ -212,7 +263,8 @@ impl<'ctx> OperationExecution<'ctx> {
         )
     }
 
-    fn build_executor(&mut self, plan_id: PlanId) -> ExecutionResult<Option<Executor<'ctx>>> {
+    fn spawn_executor(&mut self, plan_id: PlanId) {
+        tracing::trace!(%plan_id, "Starting plan");
         let operation: &'ctx OperationPlan = &self.coordinator.operation_plan;
         let engine = self.coordinator.ctx.engine;
         let response_boundary_items =
@@ -221,7 +273,7 @@ impl<'ctx> OperationExecution<'ctx> {
 
         tracing::trace!(%plan_id, "Found {} response boundary items", response_boundary_items.len());
         if response_boundary_items.is_empty() {
-            return Ok(None);
+            return;
         }
 
         let execution_plan = &operation[plan_id];
@@ -232,7 +284,7 @@ impl<'ctx> OperationExecution<'ctx> {
             plan,
             boundary_objects_view: self.response.read(
                 plan.schema(),
-                response_boundary_items,
+                response_boundary_items.clone(),
                 plan.input()
                     .map(|input| Cow::Borrowed(&input.selection_set))
                     .unwrap_or_default(),
@@ -240,7 +292,16 @@ impl<'ctx> OperationExecution<'ctx> {
             response_part,
         };
 
-        execution_plan.new_executor(input).map(Some)
+        match execution_plan.new_executor(input) {
+            Ok(executor) => self.futures.execute(plan_id, response_boundary_items, executor),
+            Err(error) => {
+                self.futures.push_result(ExecutorFutureResult {
+                    result: Err(error),
+                    response_boundary_items,
+                    plan_id,
+                });
+            }
+        }
     }
 }
 
@@ -251,15 +312,24 @@ impl<'a> ExecutorFutureSet<'a> {
         ExecutorFutureSet(FuturesUnordered::new())
     }
 
-    fn execute(&mut self, plan_id: PlanId, executor: Executor<'a>) {
-        self.push(make_send_on_wasm(async move {
+    fn execute(
+        &mut self,
+        plan_id: PlanId,
+        response_boundary_items: Arc<Vec<ResponseBoundaryItem>>,
+        executor: Executor<'a>,
+    ) {
+        self.0.push(Box::pin(make_send_on_wasm(async move {
             let result = executor.execute().await;
-            ExecutorFutureResult { plan_id, result }
-        }))
+            ExecutorFutureResult {
+                plan_id,
+                response_boundary_items,
+                result,
+            }
+        })));
     }
 
-    fn push(&mut self, fut: impl Future<Output = ExecutorFutureResult> + Send + 'a) {
-        self.0.push(Box::pin(fut));
+    fn push_result(&mut self, result: ExecutorFutureResult) {
+        self.0.push(Box::pin(async move { result }));
     }
 
     async fn next(&mut self) -> Option<ExecutorFutureResult> {
@@ -269,5 +339,6 @@ impl<'a> ExecutorFutureSet<'a> {
 
 struct ExecutorFutureResult {
     plan_id: PlanId,
+    response_boundary_items: Arc<Vec<ResponseBoundaryItem>>,
     result: ExecutionResult<ResponsePart>,
 }

@@ -133,7 +133,6 @@ impl<'ctx> GraphqlExecutor<'ctx> {
             let seed_ctx = self.plan.new_seed(&mut self.response_part);
             ExecutionResult::Ok(deserialize::ingest_deserializer_into_response(
                 &seed_ctx,
-                &self.response_boundary_item.response_path,
                 seed_ctx.create_root_seed(&self.response_boundary_item),
                 &mut serde_json::Deserializer::from_slice(&bytes),
             ))
