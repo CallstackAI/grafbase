@@ -63,7 +63,7 @@ where
             Ok(value) => Ok(value.into_nullable()),
             Err(err) => {
                 if !self.ctx.propagating_error.fetch_and(false, Ordering::Relaxed) {
-                    self.ctx.writer.borrow_mut().push_error(GraphqlError {
+                    self.ctx.writer.push_error(GraphqlError {
                         message: err.to_string(),
                         locations: vec![self.ctx.plan[self.field_id].location()],
                         path: Some(self.ctx.response_path()),

@@ -10,11 +10,11 @@ use tracing::Span;
 use super::errors::UpstreamGraphqlErrorsSeed;
 use crate::{
     execution::{ExecutionError, ExecutionResult},
-    response::ResponsePart,
+    response::ResponsePartMut,
 };
 
-pub fn ingest_deserializer_into_response<'part, 'de, DataSeed, D>(
-    part: &'part ResponsePart,
+pub fn ingest_deserializer_into_response<'resp, 'de, DataSeed, D>(
+    part: &'resp ResponsePartMut<'resp>,
     sugraph_gql_request_span: Option<Span>,
     seed: DataSeed,
     deserializer: D,
@@ -32,13 +32,13 @@ where
     .map_err(|err| ExecutionError::DeserializationError(err.to_string()))
 }
 
-struct GraphqlResponseSeed<'parent, DataSeed> {
-    part: &'parent ResponsePart,
+struct GraphqlResponseSeed<'resp, DataSeed> {
+    part: &'resp ResponsePartMut<'resp>,
     sugraph_gql_request_span: Option<Span>,
     seed: Option<DataSeed>,
 }
 
-impl<'part, 'de, DataSeed> DeserializeSeed<'de> for GraphqlResponseSeed<'part, DataSeed>
+impl<'resp, 'de, DataSeed> DeserializeSeed<'de> for GraphqlResponseSeed<'resp, DataSeed>
 where
     DataSeed: DeserializeSeed<'de, Value = ()>,
 {
@@ -52,7 +52,7 @@ where
     }
 }
 
-impl<'part, 'de, DataSeed> Visitor<'de> for GraphqlResponseSeed<'part, DataSeed>
+impl<'resp, 'de, DataSeed> Visitor<'de> for GraphqlResponseSeed<'resp, DataSeed>
 where
     DataSeed: DeserializeSeed<'de, Value = ()>,
 {

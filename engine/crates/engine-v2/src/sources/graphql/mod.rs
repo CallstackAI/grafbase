@@ -13,7 +13,7 @@ use super::{ExecutionContext, ExecutionResult, Executor, ExecutorInput, Plan};
 use crate::{
     operation::OperationType,
     plan::{PlanWalker, PlanningResult},
-    response::{ResponseObjectRef, ResponsePart},
+    response::ResponsePart,
 };
 
 mod deserialize;
@@ -47,12 +47,7 @@ impl GraphqlExecutionPlan {
 
     #[tracing::instrument(skip_all, fields(plan_id = %input.plan.id()))]
     pub fn new_executor<'ctx>(&'ctx self, input: ExecutorInput<'ctx, '_>) -> ExecutionResult<Executor<'ctx>> {
-        let ExecutorInput {
-            ctx,
-            boundary_objects_view,
-            plan,
-            response_part,
-        } = input;
+        let ExecutorInput { ctx, plan, .. } = input;
 
         let subgraph = plan.schema().walk(self.subgraph_id);
         let variables = SubgraphVariables {
@@ -77,9 +72,7 @@ impl GraphqlExecutionPlan {
             subgraph,
             operation: &self.operation,
             json_body,
-            response_boundary_item: boundary_objects_view.into_single_boundary_item(),
             plan,
-            response_part,
         }))
     }
 }
@@ -89,14 +82,12 @@ pub(crate) struct GraphqlExecutor<'ctx> {
     subgraph: GraphqlEndpointWalker<'ctx>,
     operation: &'ctx PreparedGraphqlOperation,
     json_body: String,
-    response_boundary_item: ResponseObjectRef,
     plan: PlanWalker<'ctx>,
-    response_part: ResponsePart,
 }
 
 impl<'ctx> GraphqlExecutor<'ctx> {
     #[tracing::instrument(skip_all, fields(plan_id = %self.plan.id(), federated_subgraph = %self.subgraph.name()))]
-    pub async fn execute(self) -> ExecutionResult<ResponsePart> {
+    pub async fn execute(self, mut response_part: ResponsePart) -> ExecutionResult<ResponsePart> {
         let subgraph_request_span = SubgraphRequestSpan::new(self.subgraph.name())
             .with_operation_type(self.operation.ty.as_ref())
             // The query string contains no input values, only variables. So it's safe to log.
@@ -130,18 +121,17 @@ impl<'ctx> GraphqlExecutor<'ctx> {
                 .bytes;
             tracing::debug!("{}", String::from_utf8_lossy(&bytes));
 
+            let part = response_part.as_mut();
             deserialize::ingest_deserializer_into_response(
-                &self.response_part,
+                &part,
                 Some(subgraph_request_span.clone()),
-                self.response_part
-                    .next_seed(self.plan)
-                    .ok_or_else(|| "No object to update")?,
+                part.next_seed(self.plan).ok_or("No object to update")?,
                 &mut serde_json::Deserializer::from_slice(&bytes),
             )
         }
         .instrument(subgraph_request_span.clone())
         .await?;
 
-        Ok(self.response_part)
+        Ok(response_part)
     }
 }

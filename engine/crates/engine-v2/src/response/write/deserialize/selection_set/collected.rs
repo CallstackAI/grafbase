@@ -85,21 +85,21 @@ impl<'de, 'ctx, 'parent> Visitor<'de> for CollectedSelectionSetSeed<'ctx, 'paren
     where
         A: MapAccess<'de>,
     {
-        let (maybe_object_id, fields) = self.fields_seed.visit_map(map)?;
-        let mut data = self.ctx.writer.borrow_mut();
+        let (maybe_object_definition_id, fields) = self.fields_seed.visit_map(map)?;
 
-        let id = data.push_object(ResponseObject::new(fields));
+        let id = self.ctx.writer.push_object(ResponseObject::new(fields));
         if !self.boundary_ids.is_empty() {
-            let Some(object_id) = maybe_object_id else {
+            let Some(definition_id) = maybe_object_definition_id else {
                 return Err(serde::de::Error::custom("Could not determine the __typename"));
             };
-            for boundary_id in self.boundary_ids {
-                data[*boundary_id].push(ResponseObjectRef {
+            self.ctx.writer.push_boundary_response_object(
+                self.boundary_ids,
+                ResponseObjectRef {
                     id,
                     path: self.ctx.response_path(),
-                    definition_id: object_id,
-                });
-            }
+                    definition_id,
+                },
+            );
         }
 
         Ok(id.into())

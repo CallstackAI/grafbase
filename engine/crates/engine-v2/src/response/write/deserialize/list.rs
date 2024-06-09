@@ -68,7 +68,7 @@ where
                     if !self.ctx.propagating_error.fetch_or(true, Ordering::Relaxed) {
                         let mut path = self.ctx.response_path();
                         path.push(index.into());
-                        self.ctx.writer.borrow_mut().push_error(GraphqlError {
+                        self.ctx.writer.push_error(GraphqlError {
                             message: err.to_string(),
                             locations: vec![self.ctx.plan[self.field_id].location()],
                             path: Some(path),
@@ -82,6 +82,6 @@ where
             }
         }
 
-        Ok(self.ctx.writer.borrow_mut().push_list(&values).into())
+        Ok(self.ctx.writer.push_list(&values).into())
     }
 }

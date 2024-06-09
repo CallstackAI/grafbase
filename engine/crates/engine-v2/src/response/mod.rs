@@ -9,7 +9,7 @@ use schema::Schema;
 pub use value::{ResponseObject, ResponseValue};
 pub use write::*;
 
-use crate::{execution::ExecutionError, http_response::HttpGraphqlResponse, plan::OperationPlan};
+use crate::{http_response::HttpGraphqlResponse, plan::OperationPlan};
 
 mod error;
 mod key;

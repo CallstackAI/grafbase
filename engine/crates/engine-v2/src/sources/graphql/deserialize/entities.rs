@@ -5,10 +5,10 @@ use serde::{
     Deserializer,
 };
 
-use crate::{plan::PlanWalker, response::ResponsePart, sources::ExecutionError};
+use crate::{plan::PlanWalker, response::ResponsePartMut, sources::ExecutionError};
 
 pub(in crate::sources::graphql) struct EntitiesDataSeed<'a> {
-    pub response_part: &'a ResponsePart,
+    pub response_part: &'a ResponsePartMut<'a>,
     pub plan: PlanWalker<'a>,
 }
 
@@ -60,7 +60,7 @@ enum EntitiesKey {
 }
 
 struct EntitiesSeed<'a> {
-    response_part: &'a ResponsePart,
+    response_part: &'a ResponsePartMut<'a>,
     plan: PlanWalker<'a>,
 }
 

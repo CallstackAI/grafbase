@@ -1,7 +1,6 @@
 use std::{
-    cell::{RefCell, RefMut},
+    cell::RefCell,
     fmt,
-    rc::Rc,
     sync::atomic::{AtomicBool, Ordering},
 };
 
@@ -10,10 +9,9 @@ use serde::{
     Deserializer,
 };
 
-use super::{ResponseObjectUpdate, ResponsePart, ResponseWriter};
 use crate::{
-    plan::{CollectedField, CollectedSelectionSetId, PlanWalker},
-    response::{GraphqlError, ResponseEdge, ResponseObjectRef, ResponsePath, ResponseValue},
+    plan::{CollectedField, PlanWalker},
+    response::{GraphqlError, ResponseEdge, ResponsePath, ResponseValue, ResponseWriter},
 };
 
 mod field;
@@ -31,13 +29,13 @@ use selection_set::*;
 
 pub struct SeedContext<'ctx> {
     plan: PlanWalker<'ctx>,
-    writer: ResponseWriter,
+    writer: ResponseWriter<'ctx>,
     propagating_error: AtomicBool, // using an atomic bool for convenience of fetch_or & fetch_and
     path: RefCell<Vec<ResponseEdge>>,
 }
 
 impl<'ctx> SeedContext<'ctx> {
-    pub fn new(plan: PlanWalker<'ctx>, writer: ResponseWriter) -> Self {
+    pub fn new(plan: PlanWalker<'ctx>, writer: ResponseWriter<'ctx>) -> Self {
         let path = RefCell::new(writer.root_path().iter().copied().collect());
         Self {
             plan,
@@ -77,12 +75,6 @@ impl<'ctx> SeedContext<'ctx> {
     fn response_path(&self) -> ResponsePath {
         ResponsePath::from(self.path.borrow().clone())
     }
-
-    fn set_response_path(&self, path: &ResponsePath) {
-        let mut current = self.path.borrow_mut();
-        current.clear();
-        current.extend(path.iter());
-    }
 }
 
 pub(crate) struct UpdateSeed<'ctx> {
@@ -90,7 +82,7 @@ pub(crate) struct UpdateSeed<'ctx> {
 }
 
 impl<'ctx> UpdateSeed<'ctx> {
-    pub(super) fn new(plan: PlanWalker<'ctx>, writer: ResponseWriter) -> Self {
+    pub(super) fn new(plan: PlanWalker<'ctx>, writer: ResponseWriter<'ctx>) -> Self {
         Self {
             ctx: SeedContext::new(plan, writer),
         }

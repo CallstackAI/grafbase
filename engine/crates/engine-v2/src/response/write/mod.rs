@@ -2,13 +2,12 @@ mod deserialize;
 mod ids;
 
 use std::{
-    borrow::Borrow,
     cell::{RefCell, RefMut},
+    collections::BTreeSet,
     rc::Rc,
     sync::Arc,
 };
 
-pub(crate) use deserialize::SeedContext;
 use id_newtypes::IdRange;
 pub use ids::*;
 use itertools::Either;
@@ -20,7 +19,10 @@ use super::{
     GraphqlError, InitialResponse, Response, ResponseData, ResponseEdge, ResponseObject, ResponseObjectRef,
     ResponsePath, ResponseValue, UnpackedResponseEdge,
 };
-use crate::plan::{OperationPlan, PlanBoundaryId, PlanWalker};
+use crate::{
+    execution::ExecutionError,
+    plan::{OperationPlan, PlanBoundaryId, PlanWalker},
+};
 
 pub(crate) struct ResponseDataPart {
     id: ResponseDataPartId,
@@ -69,9 +71,9 @@ impl ResponseBuilder {
         }
     }
 
-    pub fn new_writer(
+    pub fn new_part(
         &mut self,
-        root_response_objects: Arc<Vec<ResponseObjectRef>>,
+        root_response_object_refs: Arc<Vec<ResponseObjectRef>>,
         plan_boundary_ids: IdRange<PlanBoundaryId>,
     ) -> ResponsePart {
         let id = ResponseDataPartId::from(self.parts.len());
@@ -79,10 +81,10 @@ impl ResponseBuilder {
         // any data in this part before it's added. And a part can only be overwritten if it's
         // empty.
         self.parts.push(ResponseDataPart::new(id));
-        ResponsePart::new(ResponseDataPart::new(id), root_response_objects, plan_boundary_ids)
+        ResponsePart::new(ResponseDataPart::new(id), root_response_object_refs, plan_boundary_ids)
     }
 
-    pub fn root_response_boundary_item(&self) -> Option<ResponseObjectRef> {
+    pub fn root_response_object(&self) -> Option<ResponseObjectRef> {
         self.root.map(|(response_object_id, object_id)| ResponseObjectRef {
             id: response_object_id,
             path: ResponsePath::default(),
@@ -90,32 +92,62 @@ impl ResponseBuilder {
         })
     }
 
-    pub fn ingest(&mut self, part: ResponsePart) -> Vec<(PlanBoundaryId, Vec<ResponseObjectRef>)> {
-        let part = Rc::into_inner(part.inner)
-            .expect("All use of ResponsePart must be finished by now.")
-            .into_inner();
+    pub fn propagate_execution_error(
+        &mut self,
+        root_response_object_refs: Arc<Vec<ResponseObjectRef>>,
+        error: ExecutionError,
+    ) {
+        let mut invalidated_paths = Vec::<&ResponsePath>::new();
+        for obj_ref in root_response_object_refs.iter() {
+            if invalidated_paths.iter().any(|path| obj_ref.path.starts_with(path)) {
+                continue;
+            }
 
+            self.errors.push(GraphqlError {
+                message: error.to_string(),
+                path: Some(obj_ref.path.clone()),
+                ..Default::default()
+            });
+            invalidated_paths.push(&obj_ref.path);
+        }
+    }
+
+    pub fn ingest(&mut self, part: ResponsePart) -> Vec<(PlanBoundaryId, Vec<ResponseObjectRef>)> {
         let reservation = &mut self.parts[usize::from(part.data.id)];
         assert!(reservation.is_empty(), "Part already has data");
         *reservation = part.data;
 
         self.errors.extend(part.errors);
-        for (update, obj_ref) in part.updates.into_iter().zip(part.root_response_objects.iter()) {
+        let mut invalidated_paths = Vec::<ResponsePath>::new();
+        for (update, obj_ref) in part.updates.into_iter().zip(part.root_response_object_refs.iter()) {
             match update {
                 UpdateSlot::Reserved => todo!(),
                 UpdateSlot::Fields(fields) => {
                     self[obj_ref.id].extend(fields);
                 }
                 UpdateSlot::Error => {
-                    self.propagate_error(&obj_ref.path);
+                    if let Some(invalidated_path) = self.propagate_error(&obj_ref.path) {
+                        if !invalidated_paths.iter().any(|path| invalidated_path.starts_with(path)) {
+                            invalidated_paths.push(invalidated_path.to_vec().into());
+                        }
+                    }
                 }
             }
         }
-        for path in part.error_paths_to_propagate {
-            self.propagate_error(&path);
+        let mut boundaries = part.plan_boundaries;
+        if !invalidated_paths.is_empty() {
+            boundaries = boundaries
+                .into_iter()
+                .map(|(id, refs)| {
+                    let refs = refs
+                        .into_iter()
+                        .filter(|obj| !invalidated_paths.iter().any(|path| obj.path.starts_with(path)))
+                        .collect();
+                    (id, refs)
+                })
+                .collect();
         }
-        // The boundary objects are only accessible after we ingested them
-        part.plan_boundaries
+        boundaries
     }
 
     pub fn build(self, schema: Arc<Schema>, operation: Arc<OperationPlan>) -> Response {
@@ -134,14 +166,13 @@ impl ResponseBuilder {
     // was in a different part (provided by a parent plan).
     // To correctly propagate error we're finding the last nullable element in the path and make it
     // nullable. If there's nothing, then root will be null.
-    fn propagate_error(&mut self, path: &ResponsePath) {
-        let Some((root, _)) = self.root else {
-            return;
-        };
+    fn propagate_error<'p>(&mut self, path: &'p ResponsePath) -> Option<&'p [ResponseEdge]> {
+        let (root, _) = self.root?;
 
+        let mut last_nullable_path_end = 0;
         let mut last_nullable: Option<ResponseValueId> = None;
         let mut previous: Either<ResponseObjectId, ResponseListId> = Either::Left(root);
-        for &edge in path.iter() {
+        for (i, &edge) in path.iter().enumerate() {
             let (id, value) = match (previous, edge.unpack()) {
                 (
                     Either::Left(object_id),
@@ -149,7 +180,7 @@ impl ResponseBuilder {
                 ) => {
                     let Some(field_position) = self[object_id].field_position(edge) else {
                         // Shouldn't happen but equivalent to null
-                        return;
+                        return None;
                     };
                     let id = ResponseValueId::ObjectField {
                         object_id,
@@ -162,14 +193,14 @@ impl ResponseBuilder {
                     let id = ResponseValueId::ListItem { list_id, index };
                     let Some(value) = self[list_id].get(index) else {
                         // Shouldn't happen but equivalent to null
-                        return;
+                        return None;
                     };
                     (id, value)
                 }
-                _ => return,
+                _ => return None,
             };
             if value.is_null() {
-                return;
+                return None;
             }
             match *value {
                 ResponseValue::Object {
@@ -178,6 +209,7 @@ impl ResponseBuilder {
                     index,
                 } => {
                     if nullable {
+                        last_nullable_path_end = i;
                         last_nullable = Some(id);
                     }
                     previous = Either::Left(ResponseObjectId { part_id, index });
@@ -189,6 +221,7 @@ impl ResponseBuilder {
                     length,
                 } => {
                     if nullable {
+                        last_nullable_path_end = i;
                         last_nullable = Some(id);
                     }
                     previous = Either::Right(ResponseListId {
@@ -215,10 +248,11 @@ impl ResponseBuilder {
         } else {
             self.root = None;
         }
+        Some(&path[..last_nullable_path_end])
     }
 }
 
-pub enum ResponseValueId {
+enum ResponseValueId {
     ObjectField {
         object_id: ResponseObjectId,
         field_position: usize,
@@ -230,20 +264,19 @@ pub enum ResponseValueId {
 }
 
 #[derive(Clone)]
-pub(crate) struct ResponsePart {
+pub(crate) struct ResponsePartMut<'resp> {
     /// We end up writing objects or lists at various step of the de-serialization / query
     /// traversal, so having a RefCell is by far the easiest. We don't need a lock as executor are
     /// not expected to parallelize their work.
     /// The Rc makes it possible to write errors at one place and the data in another.
-    inner: Rc<RefCell<ResponsePartInner>>,
+    inner: Rc<RefCell<&'resp mut ResponsePart>>,
 }
 
-pub(crate) struct ResponsePartInner {
+pub(crate) struct ResponsePart {
     data: ResponseDataPart,
-    root_response_objects: Arc<Vec<ResponseObjectRef>>,
+    root_response_object_refs: Arc<Vec<ResponseObjectRef>>,
     errors: Vec<GraphqlError>,
     updates: Vec<UpdateSlot>,
-    error_paths_to_propagate: Vec<ResponsePath>,
     plan_boundary_ids_start: usize,
     plan_boundaries: Vec<(PlanBoundaryId, Vec<ResponseObjectRef>)>,
 }
@@ -251,28 +284,37 @@ pub(crate) struct ResponsePartInner {
 impl ResponsePart {
     fn new(
         data: ResponseDataPart,
-        root_response_objects: Arc<Vec<ResponseObjectRef>>,
+        root_response_object_refs: Arc<Vec<ResponseObjectRef>>,
         plan_boundary_ids: IdRange<PlanBoundaryId>,
-    ) -> ResponsePart {
-        let inner = ResponsePartInner {
+    ) -> Self {
+        Self {
             data,
-            root_response_objects,
+            root_response_object_refs,
             errors: Vec::new(),
             updates: Vec::new(),
-            error_paths_to_propagate: Vec::new(),
             plan_boundary_ids_start: usize::from(plan_boundary_ids.start),
             plan_boundaries: plan_boundary_ids.map(|id| (id, Vec::new())).collect(),
-        };
-        Self {
-            inner: Rc::new(RefCell::new(inner)),
         }
     }
 
-    pub fn next_seed<'ctx>(&self, plan: PlanWalker<'ctx>) -> Option<UpdateSeed<'ctx>> {
+    /// Executors manipulate the response part within a Send future, so we can't use Rc/RefCell
+    /// initially to send the response part. However, once within
+    pub fn as_mut(&mut self) -> ResponsePartMut<'_> {
+        ResponsePartMut {
+            inner: Rc::new(RefCell::new(self)),
+        }
+    }
+}
+
+impl<'resp> ResponsePartMut<'resp> {
+    pub fn next_seed<'ctx>(&self, plan: PlanWalker<'ctx>) -> Option<UpdateSeed<'resp>>
+    where
+        'ctx: 'resp,
+    {
         self.next_writer().map(|writer| UpdateSeed::new(plan, writer))
     }
 
-    pub fn next_writer(&self) -> Option<ResponseWriter> {
+    pub fn next_writer(&self) -> Option<ResponseWriter<'resp>> {
         let index = {
             let mut inner = self.inner.borrow_mut();
             if inner.updates.len() == inner.data.objects.len() {
@@ -296,18 +338,18 @@ impl ResponsePart {
     }
 }
 
-pub struct ResponseWriter {
+pub struct ResponseWriter<'resp> {
     index: usize,
-    part: ResponsePart,
+    part: ResponsePartMut<'resp>,
 }
 
-impl ResponseWriter {
-    fn part(&self) -> RefMut<'_, ResponsePartInner> {
+impl<'resp> ResponseWriter<'resp> {
+    fn part(&self) -> RefMut<'_, &'resp mut ResponsePart> {
         self.part.inner.borrow_mut()
     }
 
     pub fn root_path(&self) -> ResponsePath {
-        RefCell::borrow(&self.part.inner).root_response_objects[self.index]
+        RefCell::borrow(&self.part.inner).root_response_object_refs[self.index]
             .path
             .clone()
     }
@@ -338,34 +380,32 @@ impl ResponseWriter {
         self.part().errors.push(error.into());
     }
 
-    pub fn push_errors(&self, errors: Vec<GraphqlError>) {
-        self.part().errors.extend(errors);
+    pub fn push_boundary_response_object(&self, boundary_ids: &[PlanBoundaryId], obj: ResponseObjectRef) {
+        let mut part = self.part();
+        for boundary_id in boundary_ids {
+            part[*boundary_id].push(obj.clone());
+        }
     }
 }
 
-// impl std::ops::Index<PlanBoundaryId> for ResponseWriter {
-//     type Output = Vec<ResponseObjectRef>;
-//
-//     fn index(&self, id: PlanBoundaryId) -> &Self::Output {
-//         let n = usize::from(id) - self.plan_boundary_ids_start;
-//         &self.plan_boundaries[n].1
-//     }
-// }
-//
-// impl std::ops::IndexMut<PlanBoundaryId> for ResponseWriter {
-//     fn index_mut(&mut self, id: PlanBoundaryId) -> &mut Self::Output {
-//         let n = usize::from(id) - self.plan_boundary_ids_start;
-//         &mut self.plan_boundaries[n].1
-//     }
-// }
+impl std::ops::Index<PlanBoundaryId> for ResponsePart {
+    type Output = Vec<ResponseObjectRef>;
+
+    fn index(&self, id: PlanBoundaryId) -> &Self::Output {
+        let n = usize::from(id) - self.plan_boundary_ids_start;
+        &self.plan_boundaries[n].1
+    }
+}
+
+impl std::ops::IndexMut<PlanBoundaryId> for ResponsePart {
+    fn index_mut(&mut self, id: PlanBoundaryId) -> &mut Self::Output {
+        let n = usize::from(id) - self.plan_boundary_ids_start;
+        &mut self.plan_boundaries[n].1
+    }
+}
 
 enum UpdateSlot {
     Reserved,
     Fields(Vec<(ResponseEdge, ResponseValue)>),
     Error,
-}
-
-pub struct ResponseObjectUpdate {
-    pub id: ResponseObjectId,
-    pub fields: Vec<(ResponseEdge, ResponseValue)>,
 }

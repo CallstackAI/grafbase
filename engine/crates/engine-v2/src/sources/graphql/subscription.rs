@@ -89,7 +89,7 @@ impl<'ctx> GraphqlSubscriptionExecutor<'ctx> {
 
         Ok(Box::pin(stream.map(move |response| {
             let mut execution = new_execution();
-            ingest_response(&mut execution, plan, response?);
+            ingest_response(&mut execution, plan, response?)?;
             Ok(execution)
         })))
     }
@@ -99,14 +99,13 @@ fn ingest_response(
     execution: &mut OperationRootPlanExecution<'_>,
     plan: PlanWalker<'_>,
     subgraph_response: serde_json::Value,
-) {
+) -> ExecutionResult<()> {
+    let part = execution.root_response_part().as_mut();
     ingest_deserializer_into_response(
-        execution.root_response_part(),
+        &part,
         None,
-        execution
-            .root_response_part()
-            .next_seed(plan)
-            .expect("Must have a root object to update"),
+        part.next_seed(plan).expect("Must have a root object to update"),
         subgraph_response,
-    );
+    )?;
+    Ok(())
 }

@@ -9,36 +9,26 @@ impl IntrospectionExecutionPlan {
     #[allow(clippy::unnecessary_wraps)]
     pub fn new_executor<'ctx>(
         &'ctx self,
-        ExecutorInput {
-            ctx,
-            plan,
-            response_part,
-            ..
-        }: ExecutorInput<'ctx, '_>,
+        ExecutorInput { ctx, plan, .. }: ExecutorInput<'ctx, '_>,
     ) -> Result<Executor<'ctx>, ExecutionError> {
-        Ok(Executor::Introspection(IntrospectionExecutor {
-            ctx,
-            plan,
-            response_part,
-        }))
+        Ok(Executor::Introspection(IntrospectionExecutor { ctx, plan }))
     }
 }
 
 pub(crate) struct IntrospectionExecutor<'ctx> {
     ctx: ExecutionContext<'ctx>,
     plan: PlanWalker<'ctx>,
-    response_part: ResponsePart,
 }
 
 impl<'ctx> IntrospectionExecutor<'ctx> {
-    pub async fn execute(self) -> Result<ResponsePart, ExecutionError> {
+    pub async fn execute(self, mut response_part: ResponsePart) -> Result<ResponsePart, ExecutionError> {
         writer::IntrospectionWriter {
             schema: self.ctx.engine.schema.walker(),
             metadata: self.ctx.engine.schema.walker().introspection_metadata(),
             plan: self.plan,
-            response: self.response_part.next_writer().ok_or_else(|| "No objects to update")?,
+            response: response_part.as_mut().next_writer().ok_or("No objects to update")?,
         }
         .execute();
-        Ok(self.response_part)
+        Ok(response_part)
     }
 }

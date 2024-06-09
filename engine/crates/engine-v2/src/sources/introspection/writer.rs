@@ -18,7 +18,7 @@ pub(super) struct IntrospectionWriter<'a> {
     pub schema: SchemaWalker<'a, ()>,
     pub metadata: &'a IntrospectionMetadata,
     pub plan: PlanWalker<'a>,
-    pub response: ResponseWriter,
+    pub response: ResponseWriter<'a>,
 }
 
 impl<'a> IntrospectionWriter<'a> {

@@ -3,7 +3,7 @@ use schema::FieldDefinitionWalker;
 use super::{FieldArgumentsWalker, OperationWalker, SelectionSetWalker};
 use crate::{
     operation::{Field, FieldId, Location},
-    response::{ResponseEdge, ResponseKey},
+    response::ResponseKey,
 };
 
 pub type FieldWalker<'a> = OperationWalker<'a, FieldId>;
@@ -22,10 +22,6 @@ impl<'a> FieldWalker<'a> {
 
     pub fn response_key(&self) -> ResponseKey {
         self.as_ref().response_key()
-    }
-
-    pub fn response_edge(&self) -> ResponseEdge {
-        self.as_ref().response_edge()
     }
 
     pub fn response_key_str(&self) -> &'a str {

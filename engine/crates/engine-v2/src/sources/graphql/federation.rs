@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use grafbase_tracing::span::subgraph::SubgraphRequestSpan;
 use runtime::fetch::FetchRequest;
 use schema::{
@@ -12,7 +10,7 @@ use crate::{
     execution::ExecutionContext,
     operation::OperationType,
     plan::{PlanWalker, PlanningResult},
-    response::{ResponseObjectRef, ResponsePart},
+    response::ResponsePart,
     sources::{ExecutionResult, Executor, ExecutorInput, Plan},
 };
 
@@ -41,12 +39,11 @@ impl FederationEntityExecutionPlan {
     pub fn new_executor<'ctx>(&'ctx self, input: ExecutorInput<'ctx, '_>) -> ExecutionResult<Executor<'ctx>> {
         let ExecutorInput {
             ctx,
-            boundary_objects_view,
             plan,
-            response_part,
+            root_response_objects,
         } = input;
 
-        let boundary_objects_view = boundary_objects_view.with_extra_constant_fields(vec![(
+        let root_response_objects = root_response_objects.with_extra_constant_fields(vec![(
             "__typename".to_string(),
             serde_json::Value::String(
                 ctx.engine
@@ -57,11 +54,10 @@ impl FederationEntityExecutionPlan {
                     .to_string(),
             ),
         )]);
-        let response_boundary_items = boundary_objects_view.items().clone();
         let variables = SubgraphVariables {
             plan,
             variables: &self.operation.variables,
-            inputs: vec![(&self.operation.entities_variable_name, boundary_objects_view)],
+            inputs: vec![(&self.operation.entities_variable_name, root_response_objects)],
         };
 
         let subgraph = ctx.engine.schema.walk(self.subgraph_id);
@@ -82,9 +78,7 @@ impl FederationEntityExecutionPlan {
             subgraph,
             operation: &self.operation,
             json_body,
-            response_boundary_items,
             plan,
-            response_part,
         }))
     }
 }
@@ -94,14 +88,12 @@ pub(crate) struct FederationEntityExecutor<'ctx> {
     subgraph: GraphqlEndpointWalker<'ctx>,
     operation: &'ctx PreparedFederationEntityOperation,
     json_body: String,
-    response_boundary_items: Arc<Vec<ResponseObjectRef>>,
     plan: PlanWalker<'ctx>,
-    response_part: ResponsePart,
 }
 
 impl<'ctx> FederationEntityExecutor<'ctx> {
     #[tracing::instrument(skip_all, fields(plan_id = %self.plan.id(), federated_subgraph = %self.subgraph.name()))]
-    pub async fn execute(self) -> ExecutionResult<ResponsePart> {
+    pub async fn execute(self, mut response_part: ResponsePart) -> ExecutionResult<ResponsePart> {
         let subgraph_gql_request_span = SubgraphRequestSpan::new(self.subgraph.name())
             .with_operation_type(OperationType::Query.as_ref())
             // The query string contains no input values, only variables. So it's safe to log.
@@ -135,11 +127,12 @@ impl<'ctx> FederationEntityExecutor<'ctx> {
                 .bytes;
             tracing::debug!("{}", String::from_utf8_lossy(&bytes));
 
+            let part = response_part.as_mut();
             ingest_deserializer_into_response(
-                &self.response_part,
+                &part,
                 Some(subgraph_gql_request_span.clone()),
                 EntitiesDataSeed {
-                    response_part: &self.response_part,
+                    response_part: &part,
                     plan: self.plan,
                 },
                 &mut serde_json::Deserializer::from_slice(&bytes),
@@ -148,6 +141,6 @@ impl<'ctx> FederationEntityExecutor<'ctx> {
         .instrument(subgraph_gql_request_span.clone())
         .await?;
 
-        Ok(self.response_part)
+        Ok(response_part)
     }
 }

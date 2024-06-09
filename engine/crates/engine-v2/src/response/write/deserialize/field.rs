@@ -68,7 +68,7 @@ impl<'de, 'ctx, 'parent> DeserializeSeed<'de> for FieldSeed<'ctx, 'parent> {
 
         result.map_err(move |err| {
             if !self.ctx.propagating_error.fetch_or(true, Ordering::Relaxed) {
-                self.ctx.writer.borrow_mut().push_error(GraphqlError {
+                self.ctx.writer.push_error(GraphqlError {
                     message: err.to_string(),
                     locations: vec![self.ctx.plan[self.field.id].location()],
                     path: Some(self.ctx.response_path()),
