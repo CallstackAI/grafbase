@@ -7,35 +7,36 @@ use serde::{
 };
 use tracing::Span;
 
-use super::errors::UpstreamGraphqlErrorsSeed;
-use crate::{
-    execution::{ExecutionError, ExecutionResult},
-    response::ResponsePartMut,
-};
+use super::errors::{ConcreteGraphqlErrorsSeed, GraphqlErrorsSeed};
+use crate::response::ResponsePartMut;
 
-pub fn ingest_deserializer_into_response<'resp, 'de, DataSeed, D>(
-    part: &'resp ResponsePartMut<'resp>,
-    sugraph_gql_request_span: Option<Span>,
-    seed: DataSeed,
-    deserializer: D,
-) -> ExecutionResult<()>
-where
-    D: Deserializer<'de>,
-    DataSeed: DeserializeSeed<'de, Value = ()>,
-{
-    GraphqlResponseSeed {
-        part,
-        sugraph_gql_request_span,
-        seed: Some(seed),
-    }
-    .deserialize(deserializer)
-    .map_err(|err| ExecutionError::DeserializationError(err.to_string()))
+pub(in crate::sources::graphql) struct GraphqlResponseSeed<'a, DataSeed> {
+    error_path_converter: Box<dyn GraphqlErrorsSeed + 'a>,
+    part: &'a ResponsePartMut<'a>,
+    graphql_span: Option<Span>,
+    data_seed: Option<DataSeed>,
 }
 
-struct GraphqlResponseSeed<'resp, DataSeed> {
-    part: &'resp ResponsePartMut<'resp>,
-    sugraph_gql_request_span: Option<Span>,
-    seed: Option<DataSeed>,
+impl<'a, DataSeed> GraphqlResponseSeed<'a, DataSeed> {
+    pub fn new(
+        error_path_converter: impl GraphqlErrorsSeed + 'a,
+        part: &'a ResponsePartMut<'a>,
+        seed: DataSeed,
+    ) -> Self {
+        Self {
+            error_path_converter: Box::new(error_path_converter),
+            part,
+            graphql_span: None,
+            data_seed: Some(seed),
+        }
+    }
+
+    pub fn with_graphql_span(self, span: Span) -> Self {
+        Self {
+            graphql_span: Some(span),
+            ..self
+        }
+    }
 }
 
 impl<'resp, 'de, DataSeed> DeserializeSeed<'de> for GraphqlResponseSeed<'resp, DataSeed>
@@ -70,21 +71,24 @@ where
         let mut errors = vec![];
         while let Some(key) = map.next_key::<ResponseKey>()? {
             match key {
-                ResponseKey::Data => match self.seed.take() {
+                ResponseKey::Data => match self.data_seed.take() {
                     Some(seed) => {
                         data_is_null_result = map.next_value_seed(NullableDataSeed { seed });
                     }
                     None => continue,
                 },
-                ResponseKey::Errors => map.next_value_seed(UpstreamGraphqlErrorsSeed { errors: &mut errors })?,
+                ResponseKey::Errors => map.next_value_seed(ConcreteGraphqlErrorsSeed {
+                    error_path_converter: self.error_path_converter.as_ref(),
+                    errors: &mut errors,
+                })?,
                 ResponseKey::Unknown => {
                     map.next_value::<IgnoredAny>()?;
                 }
             };
         }
 
-        if let Some(span) = self.sugraph_gql_request_span {
-            let data_is_present = self.seed.is_some();
+        let data_is_present = self.data_seed.is_some();
+        if let Some(span) = self.graphql_span {
             let status = if errors.is_empty() {
                 GraphqlResponseStatus::Success
             } else if data_is_present {

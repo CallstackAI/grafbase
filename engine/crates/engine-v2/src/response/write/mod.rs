@@ -2,8 +2,7 @@ mod deserialize;
 mod ids;
 
 use std::{
-    cell::{RefCell, RefMut},
-    collections::BTreeSet,
+    cell::{Ref, RefCell, RefMut},
     rc::Rc,
     sync::Arc,
 };
@@ -94,41 +93,58 @@ impl ResponseBuilder {
 
     pub fn propagate_execution_error(
         &mut self,
-        root_response_object_refs: Arc<Vec<ResponseObjectRef>>,
+        root_response_object_refs: &[ResponseObjectRef],
         error: ExecutionError,
     ) {
-        let mut invalidated_paths = Vec::<&ResponsePath>::new();
-        for obj_ref in root_response_object_refs.iter() {
-            if invalidated_paths.iter().any(|path| obj_ref.path.starts_with(path)) {
-                continue;
+        let mut invalidated_paths = Vec::<&[ResponseEdge]>::new();
+        for obj_ref in root_response_object_refs {
+            if !invalidated_paths.iter().any(|path| obj_ref.path.starts_with(path)) {
+                if let Some(invalidated_path) = self.propagate_error(&obj_ref.path) {
+                    self.errors.push(GraphqlError {
+                        message: error.to_string(),
+                        path: Some(obj_ref.path.clone()),
+                        ..Default::default()
+                    });
+                    invalidated_paths.push(invalidated_path);
+                }
             }
-
-            self.errors.push(GraphqlError {
-                message: error.to_string(),
-                path: Some(obj_ref.path.clone()),
-                ..Default::default()
-            });
-            invalidated_paths.push(&obj_ref.path);
         }
     }
 
-    pub fn ingest(&mut self, part: ResponsePart) -> Vec<(PlanBoundaryId, Vec<ResponseObjectRef>)> {
+    pub fn ingest(
+        &mut self,
+        part: ResponsePart,
+        default_value: Option<Vec<(ResponseEdge, ResponseValue)>>,
+    ) -> Vec<(PlanBoundaryId, Vec<ResponseObjectRef>)> {
         let reservation = &mut self.parts[usize::from(part.data.id)];
         assert!(reservation.is_empty(), "Part already has data");
         *reservation = part.data;
 
         self.errors.extend(part.errors);
-        let mut invalidated_paths = Vec::<ResponsePath>::new();
+        let mut invalidated_paths = Vec::<&[ResponseEdge]>::new();
         for (update, obj_ref) in part.updates.into_iter().zip(part.root_response_object_refs.iter()) {
             match update {
-                UpdateSlot::Reserved => todo!(),
+                UpdateSlot::Reserved => {
+                    if let Some(fields) = &default_value {
+                        self[obj_ref.id].extend(fields.clone());
+                    } else if !invalidated_paths.iter().any(|path| obj_ref.path.starts_with(path)) {
+                        if let Some(invalidated_path) = self.propagate_error(&obj_ref.path) {
+                            self.errors.push(GraphqlError {
+                                message: "Missing data from subgraph".to_string(),
+                                path: Some(obj_ref.path.clone()),
+                                ..Default::default()
+                            });
+                            invalidated_paths.push(invalidated_path);
+                        }
+                    }
+                }
                 UpdateSlot::Fields(fields) => {
                     self[obj_ref.id].extend(fields);
                 }
                 UpdateSlot::Error => {
-                    if let Some(invalidated_path) = self.propagate_error(&obj_ref.path) {
-                        if !invalidated_paths.iter().any(|path| invalidated_path.starts_with(path)) {
-                            invalidated_paths.push(invalidated_path.to_vec().into());
+                    if !invalidated_paths.iter().any(|path| obj_ref.path.starts_with(path)) {
+                        if let Some(invalidated_path) = self.propagate_error(&obj_ref.path) {
+                            invalidated_paths.push(invalidated_path);
                         }
                     }
                 }
@@ -317,7 +333,7 @@ impl<'resp> ResponsePartMut<'resp> {
     pub fn next_writer(&self) -> Option<ResponseWriter<'resp>> {
         let index = {
             let mut inner = self.inner.borrow_mut();
-            if inner.updates.len() == inner.data.objects.len() {
+            if inner.updates.len() == inner.root_response_object_refs.len() {
                 return None;
             }
             inner.updates.push(UpdateSlot::Reserved);
@@ -329,11 +345,15 @@ impl<'resp> ResponsePartMut<'resp> {
         })
     }
 
+    pub fn root_response_object_refs(&self) -> Ref<'_, [ResponseObjectRef]> {
+        Ref::map(self.inner.borrow(), |inner| inner.root_response_object_refs.as_slice())
+    }
+
     pub fn push_error(&self, error: impl Into<GraphqlError>) {
         self.inner.borrow_mut().errors.push(error.into());
     }
 
-    pub fn push_errors(&self, errors: Vec<GraphqlError>) {
+    pub fn push_errors(&self, errors: impl IntoIterator<Item = GraphqlError>) {
         self.inner.borrow_mut().errors.extend(errors);
     }
 }

@@ -11,7 +11,7 @@ use serde::{
 
 use crate::{
     plan::{CollectedField, PlanWalker},
-    response::{GraphqlError, ResponseEdge, ResponsePath, ResponseValue, ResponseWriter},
+    response::{GraphqlError, ResponseEdge, ResponsePath, ResponseWriter},
 };
 
 mod field;
@@ -106,23 +106,9 @@ impl<'de, 'ctx> DeserializeSeed<'de> for UpdateSeed<'ctx> {
             Ok(Some((_, fields))) => {
                 ctx.writer.update_root_object_with(fields);
             }
-            Ok(None) => {
-                let field_ids = ctx.plan[selection_set_id].field_ids;
-                let mut fields = Vec::with_capacity(field_ids.len());
-                for field in &ctx.plan[field_ids] {
-                    if field.wrapping.is_required() {
-                        ctx.writer.propagate_error(GraphqlError {
-                            message: ctx.missing_field_error_message(field),
-                            path: Some(ctx.response_path().child(field.edge)),
-                            ..Default::default()
-                        });
-                        return Ok(());
-                    } else {
-                        fields.push((field.edge, ResponseValue::Null));
-                    }
-                }
-                ctx.writer.update_root_object_with(fields);
-            }
+            // Not writing any data is handled at the Coordinator level in all cases, so we can
+            // just skip it here.
+            Ok(None) => {}
             Err(err) => {
                 if !ctx.propagating_error.fetch_or(true, Ordering::Relaxed) {
                     ctx.writer.propagate_error(GraphqlError {

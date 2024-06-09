@@ -32,3 +32,9 @@ impl From<String> for ExecutionError {
         Self::Internal(message)
     }
 }
+
+impl From<serde_json::Error> for ExecutionError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::DeserializationError(err.to_string())
+    }
+}

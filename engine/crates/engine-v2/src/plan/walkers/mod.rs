@@ -57,7 +57,7 @@ where
 }
 
 impl<'a> PlanWalker<'a> {
-    pub fn schema(&self) -> SchemaWalker<'a> {
+    pub fn schema(&self) -> SchemaWalker<'a, ()> {
         self.schema_walker
     }
 

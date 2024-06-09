@@ -13,7 +13,7 @@ use crate::{
     execution::ExecutionContext,
     operation::{Operation, Variables},
     plan::{OperationExecutionState, OperationPlan, PlanId, PlanWalker},
-    response::{IngestionResult, Response, ResponseBuilder, ResponseObjectRef, ResponsePart},
+    response::{Response, ResponseBuilder, ResponseEdge, ResponseObjectRef, ResponsePart, ResponseValue},
     sources::{Executor, ExecutorInput, SubscriptionInput},
 };
 
@@ -226,7 +226,8 @@ impl<'ctx> OperationExecution<'ctx> {
                 Ok(part) => {
                     tracing::trace!(%plan_id, "Succeeded");
 
-                    for (plan_bounday_id, boundary) in self.response.ingest(part) {
+                    let default_value = self.generate_default_value(plan_id);
+                    for (plan_bounday_id, boundary) in self.response.ingest(part, default_value) {
                         self.state.push_boundary_response_object_refs(plan_bounday_id, boundary);
                     }
 
@@ -240,7 +241,7 @@ impl<'ctx> OperationExecution<'ctx> {
                 Err(error) => {
                     tracing::trace!(%plan_id, "Failed");
                     self.response
-                        .propagate_execution_error(root_response_object_refs, error);
+                        .propagate_execution_error(&root_response_object_refs, error);
                 }
             };
         }
@@ -249,6 +250,21 @@ impl<'ctx> OperationExecution<'ctx> {
             self.coordinator.ctx.engine.schema.clone(),
             self.coordinator.operation_plan.clone(),
         )
+    }
+
+    fn generate_default_value(&self, plan_id: PlanId) -> Option<Vec<(ResponseEdge, ResponseValue)>> {
+        let walker = self.coordinator.plan_walker(plan_id);
+        let fields = walker.collected_selection_set().fields();
+        let mut default_value = Vec::with_capacity(fields.len());
+        for field in fields {
+            let field = field.as_ref();
+            if field.wrapping.is_required() {
+                return None;
+            }
+            default_value.push((field.edge, ResponseValue::Null))
+        }
+
+        Some(default_value)
     }
 
     fn spawn_executor(&mut self, plan_id: PlanId) {

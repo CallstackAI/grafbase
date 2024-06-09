@@ -67,7 +67,7 @@ where
                 Err(err) => {
                     if !self.ctx.propagating_error.fetch_or(true, Ordering::Relaxed) {
                         let mut path = self.ctx.response_path();
-                        path.push(index.into());
+                        path.push(index);
                         self.ctx.writer.push_error(GraphqlError {
                             message: err.to_string(),
                             locations: vec![self.ctx.plan[self.field_id].location()],

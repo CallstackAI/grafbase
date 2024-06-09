@@ -4,6 +4,7 @@ use schema::{
     sources::graphql::{GraphqlEndpointId, GraphqlEndpointWalker, RootFieldResolverWalker},
     HeaderValueRef,
 };
+use serde::de::DeserializeSeed;
 use tracing::Instrument;
 
 use self::query::PreparedGraphqlOperation;
@@ -14,6 +15,7 @@ use crate::{
     operation::OperationType,
     plan::{PlanWalker, PlanningResult},
     response::ResponsePart,
+    sources::graphql::deserialize::{GraphqlResponseSeed, RootGraphqlErrorsSeed},
 };
 
 mod deserialize;
@@ -122,16 +124,17 @@ impl<'ctx> GraphqlExecutor<'ctx> {
             tracing::debug!("{}", String::from_utf8_lossy(&bytes));
 
             let part = response_part.as_mut();
-            deserialize::ingest_deserializer_into_response(
+            GraphqlResponseSeed::new(
+                RootGraphqlErrorsSeed::new(self.plan.response_keys()),
                 &part,
-                Some(subgraph_request_span.clone()),
                 part.next_seed(self.plan).ok_or("No object to update")?,
-                &mut serde_json::Deserializer::from_slice(&bytes),
             )
+            .with_graphql_span(subgraph_request_span.clone())
+            .deserialize(&mut serde_json::Deserializer::from_slice(&bytes))?;
+
+            Ok(response_part)
         }
         .instrument(subgraph_request_span.clone())
-        .await?;
-
-        Ok(response_part)
+        .await
     }
 }

@@ -1,10 +1,11 @@
 use futures_util::{stream::BoxStream, StreamExt};
 use runtime::fetch::GraphqlRequest;
 use schema::{sources::graphql::GraphqlEndpointWalker, HeaderValueRef};
+use serde::de::DeserializeSeed;
 
 use super::{
-    deserialize::ingest_deserializer_into_response, query::PreparedGraphqlOperation, variables::SubgraphVariables,
-    ExecutionContext, GraphqlExecutionPlan,
+    deserialize::GraphqlResponseSeed, query::PreparedGraphqlOperation, variables::SubgraphVariables, ExecutionContext,
+    GraphqlExecutionPlan,
 };
 use crate::{
     execution::OperationRootPlanExecution,
@@ -101,11 +102,11 @@ fn ingest_response(
     subgraph_response: serde_json::Value,
 ) -> ExecutionResult<()> {
     let part = execution.root_response_part().as_mut();
-    ingest_deserializer_into_response(
+    GraphqlResponseSeed::new(
+        plan.response_keys(),
         &part,
-        None,
         part.next_seed(plan).expect("Must have a root object to update"),
-        subgraph_response,
-    )?;
+    )
+    .deserialize(subgraph_response)?;
     Ok(())
 }

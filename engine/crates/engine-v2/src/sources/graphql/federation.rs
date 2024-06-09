@@ -4,6 +4,7 @@ use schema::{
     sources::graphql::{FederationEntityResolverWalker, GraphqlEndpointId, GraphqlEndpointWalker},
     HeaderValueRef,
 };
+use serde::de::DeserializeSeed;
 use tracing::Instrument;
 
 use crate::{
@@ -11,14 +12,10 @@ use crate::{
     operation::OperationType,
     plan::{PlanWalker, PlanningResult},
     response::ResponsePart,
-    sources::{ExecutionResult, Executor, ExecutorInput, Plan},
+    sources::{graphql::deserialize::GraphqlResponseSeed, ExecutionResult, Executor, ExecutorInput, Plan},
 };
 
-use super::{
-    deserialize::{ingest_deserializer_into_response, EntitiesDataSeed},
-    query::PreparedFederationEntityOperation,
-    variables::SubgraphVariables,
-};
+use super::{deserialize::EntitiesDataSeed, query::PreparedFederationEntityOperation, variables::SubgraphVariables};
 
 pub(crate) struct FederationEntityExecutionPlan {
     subgraph_id: GraphqlEndpointId,
@@ -128,19 +125,19 @@ impl<'ctx> FederationEntityExecutor<'ctx> {
             tracing::debug!("{}", String::from_utf8_lossy(&bytes));
 
             let part = response_part.as_mut();
-            ingest_deserializer_into_response(
+
+            GraphqlResponseSeed::new(
+                self.plan.response_keys(),
                 &part,
-                Some(subgraph_gql_request_span.clone()),
                 EntitiesDataSeed {
                     response_part: &part,
                     plan: self.plan,
                 },
-                &mut serde_json::Deserializer::from_slice(&bytes),
             )
+            .deserialize(&mut serde_json::Deserializer::from_slice(&bytes))?;
+            Ok(response_part)
         }
         .instrument(subgraph_gql_request_span.clone())
-        .await?;
-
-        Ok(response_part)
+        .await
     }
 }

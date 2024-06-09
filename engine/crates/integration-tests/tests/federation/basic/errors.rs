@@ -19,7 +19,13 @@ fn root_error() {
     let response = integration_tests::runtime().block_on(engine.execute());
     insta::assert_json_snapshot!(response, @r###"
     {
-      "data": {}
+      "data": null,
+      "errors": [
+        {
+          "message": "Missing data from subgraph",
+          "path": []
+        }
+      ]
     }
     "###);
 }
