@@ -3,17 +3,9 @@ use std::borrow::Cow;
 use url::Url;
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Hash, PartialEq, Eq)]
-#[serde(untagged)]
-enum IdOrName {
-    LegacyId { id: u16 },
-    Name { name: String },
-}
-
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Hash, PartialEq, Eq)]
 pub struct Resolver {
     /// A unique name for the given GraphQL resolver instance.
-    #[serde(flatten)]
-    id_or_name: IdOrName,
+    name: String,
 
     /// The name of this GraphQL resolver instance.
     ///
@@ -42,7 +34,7 @@ impl Resolver {
     #[must_use]
     pub fn new(name: String, url: Url, namespace: Option<String>, type_prefix: Option<String>) -> Self {
         Self {
-            id_or_name: IdOrName::Name { name },
+            name,
             url,
             namespace,
             type_prefix,
@@ -51,10 +43,7 @@ impl Resolver {
 
     #[must_use]
     pub fn name(&self) -> Cow<'_, String> {
-        match &self.id_or_name {
-            IdOrName::LegacyId { id } => Cow::Owned(id.to_string()),
-            IdOrName::Name { name } => Cow::Borrowed(name),
-        }
+        Cow::Borrowed(&self.name)
     }
 
     #[cfg(test)]
@@ -65,7 +54,7 @@ impl Resolver {
         };
 
         Self {
-            id_or_name: IdOrName::Name { name: name.to_string() },
+            name: name.to_string(),
             type_prefix: namespace.clone(),
             namespace,
             url: Url::parse(url.as_ref()).expect("valid url"),
