@@ -55,7 +55,7 @@ impl<'a> GqlRequestSpan<'a> {
         info_span!(
             target: crate::span::GRAFBASE_TARGET,
             GRAPHQL_SPAN_NAME,
-            "gql.operation.name" = self.operation_name,
+            "gql.operation.name" = self.operation_name.clone(),
             "gql.operation.type" = self.operation_type,
             "gql.response.has_errors" = self.has_errors,
             "gql.document" = self.document,
