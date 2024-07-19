@@ -91,6 +91,8 @@ impl FederationEntityPreparedExecutor {
         }
         .into_span();
 
+        let retry_budget = ctx.engine.retry_budget_for_subgraph(self.subgraph_id);
+
         let fut = execute_subgraph_request(
             ctx,
             span.clone(),
@@ -101,6 +103,7 @@ impl FederationEntityPreparedExecutor {
                 json_body,
                 subgraph_name: subgraph.name(),
                 timeout: subgraph.timeout(),
+                retry_budget,
             },
             move |bytes: Bytes| {
                 let response = subgraph_response.as_mut();
