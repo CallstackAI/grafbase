@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use opentelemetry::trace::noop::NoopTracer;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
-use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+//use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::runtime::RuntimeChannel;
 use opentelemetry_sdk::trace::IdGenerator;
 use opentelemetry_sdk::Resource;
@@ -30,7 +30,7 @@ pub struct ReloadableOtelLayers<S> {
     /// A reloadable metrics layer
     pub meter_provider: Option<opentelemetry_sdk::metrics::SdkMeterProvider>,
     /// A reloadable logging layer
-    pub logger: Option<LoggerLayer>,
+    pub logger: Option<()>,
 }
 
 /// Holds tracing reloadable layer components
@@ -43,10 +43,10 @@ pub struct ReloadableOtelLayer<Subscriber, Provider> {
     pub provider: Provider,
 }
 
-pub struct LoggerLayer {
-    pub layer: OpenTelemetryTracingBridge<opentelemetry_sdk::logs::LoggerProvider, opentelemetry_sdk::logs::Logger>,
-    pub provider: opentelemetry_sdk::logs::LoggerProvider,
-}
+// pub struct LoggerLayer {
+//     pub layer: OpenTelemetryTracingBridge<opentelemetry_sdk::logs::LoggerProvider, opentelemetry_sdk::logs::Logger>,
+//     pub provider: opentelemetry_sdk::logs::LoggerProvider,
+// }
 
 /// Creates a new OTEL tracing layer that doesn't collect or export any tracing data.
 /// The main reason this exists is to act as a placeholder in the subscriber. It's wrapped in a [`reload::Layer`]
@@ -98,13 +98,13 @@ where
         )?)
     };
 
-    let logger = match super::logs::build_logs_provider(runtime.clone(), &config, resource.clone())? {
-        Some(provider) if config.logs_exporters_enabled() => Some(LoggerLayer {
-            layer: OpenTelemetryTracingBridge::new(&provider),
-            provider,
-        }),
-        _ => None,
-    };
+    // let logger = match super::logs::build_logs_provider(runtime.clone(), &config, resource.clone())? {
+    //     Some(provider) if config.logs_exporters_enabled() => Some(LoggerLayer {
+    //         layer: OpenTelemetryTracingBridge::new(&provider),
+    //         provider,
+    //     }),
+    //     _ => None,
+    // };
 
     let tracing_layer = if config.tracing_exporters_enabled() {
         let tracer_provider = super::traces::build_trace_provider(runtime, id_generator, &config, resource.clone())?;
@@ -140,6 +140,6 @@ where
     Ok(ReloadableOtelLayers {
         tracer: Some(tracing_layer),
         meter_provider,
-        logger,
+        logger: None,
     })
 }

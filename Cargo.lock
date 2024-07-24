@@ -3718,7 +3718,6 @@ dependencies = [
  "indoc",
  "insta",
  "opentelemetry",
- "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
  "opentelemetry-stdout",
  "opentelemetry_sdk",
@@ -6057,20 +6056,6 @@ dependencies = [
  "pin-project-lite",
  "thiserror",
  "urlencoding",
-]
-
-[[package]]
-name = "opentelemetry-appender-tracing"
-version = "0.3.0"
-source = "git+https://github.com/grafbase/opentelemetry-rust?rev=830815740a43f488157e86b0c69b0b86d1aee867#830815740a43f488157e86b0c69b0b86d1aee867"
-dependencies = [
- "once_cell",
- "opentelemetry",
- "opentelemetry_sdk",
- "tracing",
- "tracing-core",
- "tracing-log",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -11024,3 +11009,8 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "opentelemetry-appender-tracing"
+version = "0.3.0"
+source = "git+https://github.com/grafbase/opentelemetry-rust?rev=830815740a43f488157e86b0c69b0b86d1aee867#830815740a43f488157e86b0c69b0b86d1aee867"
