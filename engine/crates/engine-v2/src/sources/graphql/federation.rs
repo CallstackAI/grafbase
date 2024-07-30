@@ -104,6 +104,7 @@ impl FederationEntityPreparedExecutor {
                 subgraph_name: subgraph.name(),
                 timeout: subgraph.timeout(),
                 retry_budget,
+                rate_limiter: ctx.engine.runtime.rate_limiter(),
             },
             move |bytes: Bytes| {
                 let response = subgraph_response.as_mut();
@@ -122,6 +123,7 @@ impl FederationEntityPreparedExecutor {
             },
         )
         .instrument(span);
+
         Ok(fut)
     }
 }
