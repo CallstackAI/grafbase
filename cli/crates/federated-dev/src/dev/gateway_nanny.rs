@@ -7,9 +7,8 @@ use super::bus::{EngineSender, GraphWatcher};
 use engine_v2::Engine;
 use futures_concurrency::stream::Merge;
 use futures_util::{future::BoxFuture, stream::BoxStream, FutureExt as _, StreamExt};
-use runtime::rate_limiting::KeyedRateLimitConfig;
 use runtime_local::rate_limiting::in_memory::key_based::InMemoryRateLimiter;
-use tokio::sync::mpsc;
+use tokio::sync::watch;
 use tokio_stream::wrappers::WatchStream;
 
 /// The GatewayNanny looks after the `Gateway` - on updates to the graph or config it'll
@@ -57,7 +56,12 @@ pub(super) async fn new_gateway(config: Option<engine_v2::VersionedConfig>) -> O
         .into_iter()
         .map(|(k, v)| {
             (
-                k.to_string(),
+                match k {
+                    engine_v2::config::RateLimitKey::Global => runtime::rate_limiting::RateLimitKey::Global,
+                    engine_v2::config::RateLimitKey::Subgraph(name) => {
+                        runtime::rate_limiting::RateLimitKey::Subgraph(name.to_string().into())
+                    }
+                },
                 runtime::rate_limiting::GraphRateLimit {
                     limit: v.limit,
                     duration: v.duration,
@@ -66,7 +70,7 @@ pub(super) async fn new_gateway(config: Option<engine_v2::VersionedConfig>) -> O
         })
         .collect::<HashMap<_, _>>();
 
-    let (_, rx) = mpsc::channel(100);
+    let (_, rx) = watch::channel(rate_limiting_configs);
 
     let runtime = CliRuntime {
         fetcher: runtime_local::NativeFetcher::runtime_fetcher(),
@@ -75,7 +79,7 @@ pub(super) async fn new_gateway(config: Option<engine_v2::VersionedConfig>) -> O
         ),
         kv: runtime_local::InMemoryKvStore::runtime(),
         meter: grafbase_telemetry::metrics::meter_from_global_provider(),
-        rate_limiter: InMemoryRateLimiter::runtime(KeyedRateLimitConfig { rate_limiting_configs }, rx),
+        rate_limiter: InMemoryRateLimiter::runtime(rx),
     };
 
     let schema = config.try_into().ok()?;

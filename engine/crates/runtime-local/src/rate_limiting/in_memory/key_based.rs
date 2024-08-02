@@ -1,4 +1,3 @@
-use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::{collections::HashMap, sync::RwLock};
@@ -7,69 +6,48 @@ use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use governor::Quota;
 use grafbase_telemetry::span::GRAFBASE_TARGET;
-use serde_json::Value;
 
-use http::{HeaderName, HeaderValue};
-use runtime::rate_limiting::{Error, GraphRateLimit, KeyedRateLimitConfig, RateLimiter, RateLimiterContext};
-use tokio::sync::mpsc;
+use runtime::rate_limiting::{Error, GraphRateLimit, RateLimitKey, RateLimiter, RateLimiterContext};
+use tokio::sync::watch;
 
-pub struct RateLimitingContext(pub String);
-
-impl RateLimiterContext for RateLimitingContext {
-    fn header(&self, _name: HeaderName) -> Option<&HeaderValue> {
-        None
-    }
-
-    fn graphql_operation_name(&self) -> Option<&str> {
-        None
-    }
-
-    fn ip(&self) -> Option<IpAddr> {
-        None
-    }
-
-    fn jwt_claim(&self, _key: &str) -> Option<&Value> {
-        None
-    }
-
-    fn key(&self) -> Option<&str> {
-        Some(&self.0)
-    }
-}
+type Limits = HashMap<RateLimitKey<'static>, GraphRateLimit>;
+type Limiters = HashMap<RateLimitKey<'static>, governor::DefaultKeyedRateLimiter<usize>>;
 
 pub struct InMemoryRateLimiter {
-    limiters: Arc<RwLock<HashMap<String, governor::DefaultKeyedRateLimiter<usize>>>>,
+    limiters: Arc<RwLock<Limiters>>,
 }
 
 impl InMemoryRateLimiter {
-    pub fn runtime(
-        config: KeyedRateLimitConfig,
-        mut updates: mpsc::Receiver<HashMap<String, GraphRateLimit>>,
-    ) -> RateLimiter {
+    pub fn runtime(mut updates: watch::Receiver<Limits>) -> RateLimiter {
         let mut limiters = HashMap::new();
 
         // add subgraph rate limiting configuration
-        for (name, config) in config.rate_limiting_configs {
-            let Some(limiter) = create_limiter(config) else {
+        for (name, config) in updates.borrow_and_update().iter() {
+            let Some(limiter) = create_limiter(*config) else {
                 continue;
             };
 
-            limiters.insert(name.to_string(), limiter);
+            limiters.insert(name.clone(), limiter);
         }
 
         let limiters = Arc::new(RwLock::new(limiters));
-        let limiters_copy = limiters.clone();
+        let limiters_copy = Arc::downgrade(&limiters);
 
         tokio::spawn(async move {
-            while let Some(updates) = updates.recv().await {
-                let mut limiters = limiters_copy.write().unwrap();
+            while let Ok(()) = updates.changed().await {
+                let Some(limiters) = limiters_copy.upgrade() else {
+                    break;
+                };
 
-                for (name, config) in updates {
-                    let Some(limiter) = create_limiter(config) else {
+                let mut limiters = limiters.write().unwrap();
+                limiters.clear();
+
+                for (name, config) in updates.borrow_and_update().iter() {
+                    let Some(limiter) = create_limiter(*config) else {
                         continue;
                     };
 
-                    limiters.insert(name.to_string(), limiter);
+                    limiters.insert(name.clone(), limiter);
                 }
             }
         });

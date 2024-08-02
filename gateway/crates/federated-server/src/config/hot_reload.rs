@@ -2,49 +2,23 @@ use std::{collections::HashMap, fs, path::PathBuf, sync::OnceLock, time::Duratio
 
 use grafbase_telemetry::span::GRAFBASE_TARGET;
 use notify::{EventHandler, EventKind, PollWatcher, Watcher};
-use runtime::rate_limiting::GraphRateLimit;
-use tokio::sync::{mpsc, watch};
+use runtime::rate_limiting::{GraphRateLimit, RateLimitKey};
+use tokio::sync::watch;
 
 use crate::Config;
 
-type RateLimitData = HashMap<String, GraphRateLimit>;
-
-pub(crate) enum RateLimitSender {
-    Watch(watch::Sender<RateLimitData>),
-    Mpsc(mpsc::Sender<RateLimitData>),
-}
-
-impl RateLimitSender {
-    fn send(&self, data: RateLimitData) -> crate::Result<()> {
-        match self {
-            RateLimitSender::Watch(channel) => Ok(channel.send(data)?),
-            RateLimitSender::Mpsc(channel) => Ok(channel.blocking_send(data)?),
-        }
-    }
-}
-
-impl From<watch::Sender<RateLimitData>> for RateLimitSender {
-    fn from(value: watch::Sender<RateLimitData>) -> Self {
-        Self::Watch(value)
-    }
-}
-
-impl From<mpsc::Sender<RateLimitData>> for RateLimitSender {
-    fn from(value: mpsc::Sender<RateLimitData>) -> Self {
-        Self::Mpsc(value)
-    }
-}
+type RateLimitData = HashMap<RateLimitKey<'static>, GraphRateLimit>;
 
 pub(crate) struct ConfigWatcher {
     config_path: PathBuf,
-    rate_limit_sender: RateLimitSender,
+    rate_limit_sender: watch::Sender<RateLimitData>,
 }
 
 impl ConfigWatcher {
-    pub fn new(config_path: PathBuf, rate_limit_sender: impl Into<RateLimitSender>) -> Self {
+    pub fn new(config_path: PathBuf, rate_limit_sender: watch::Sender<RateLimitData>) -> Self {
         Self {
             config_path,
-            rate_limit_sender: rate_limit_sender.into(),
+            rate_limit_sender,
         }
     }
 
@@ -90,7 +64,7 @@ impl ConfigWatcher {
             .into_iter()
             .map(|(k, v)| {
                 (
-                    k.to_string(),
+                    k,
                     runtime::rate_limiting::GraphRateLimit {
                         limit: v.limit,
                         duration: v.duration,
